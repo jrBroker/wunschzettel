@@ -60,23 +60,38 @@
     `<path d="M18 58 l3 -3 3 3 3 -3 3 3 3 -3 3 3 3 -3 3 3 3 -3 3 3" fill="none" stroke="#fff" stroke-width="1.3" opacity=".7"/>`;
 
   // ---------- people ----------
-  const SKIN = ["#fbdcc0", "#f1c19a", "#d9a07a", "#b67a52", "#8a5638"];
-  const HAIR = { dark: "#3b2416", brown: "#6b3e1f", blond: "#e0b04a", red: "#b5502b", grey: "#d4d4d4", black: "#1d1a1a", white: "#f4f4f4" };
+  // The family: fair skin, dark brown or grey hair, green eyes. Ids 1-10 male, 11-20 female.
+  const SKIN = ["#fbdcc0", "#f3cdae"];
+  const HAIR = { brown: "#3d2618", brown2: "#52331f", grey: "#8f9096", silver: "#c6c7cc", white: "#f4f4f4" };
+  const LIPS = "#b5475a";
 
   const hairBack = {
     long: (c) => `<path d="M15 36 Q15 19 32 19 Q49 19 49 36 L50 55 Q32 59 14 55 Z" fill="${c}"/>`,
+    bob: (c) => `<path d="M15.5 36 Q15 19 32 19 Q49 19 48.5 36 L49.5 47.5 Q46.5 49.5 44.5 46.5 L19.5 46.5 Q17.5 49.5 14.5 47.5 Z" fill="${c}"/>`,
     pigtails: (c) => `<circle cx="13.5" cy="43" r="5.5" fill="${c}"/><circle cx="50.5" cy="43" r="5.5" fill="${c}"/>`,
   };
   const hairTop = {
     short: (c) => `<path d="M17 33 Q16 20 32 20 Q48 20 47 33 Q44 26 36 25.5 Q30 29 22 27.5 Q18.5 29 17 33 Z" fill="${c}"/>`,
+    side: (c) => `<path d="M17 32 Q16 20 32 20 Q48 20 47 32 Q45 25 39 24.5 Q30 24 25 27 Q21 28.5 17 32 Z" fill="${c}"/>`,
+    receding: (c) => `<path d="M17 35 Q16.5 27 20.5 24.5 Q19.5 29 18.8 35 Z M47 35 Q47.5 27 43.5 24.5 Q44.5 29 45.2 35 Z" fill="${c}"/>`,
     long: (c) => `<path d="M17 34 Q16 20 32 20 Q48 20 47 34 Q45 26 32 25 Q19 26 17 34 Z" fill="${c}"/>`,
+    fringe: (c) => `<path d="M17 33 Q16 20 32 20 Q48 20 47 33 Q46 28.5 44 28 Q38 29.5 32 28.5 Q26 29.5 20 28 Q18 28.5 17 33 Z" fill="${c}"/>`,
     curly: (c) => [[19, 30, 4.6], [21.5, 24.5, 5], [27, 21, 5.2], [33.5, 20.2, 5.2], [39.5, 22, 5], [44, 26.5, 4.8], [45.5, 31, 4]]
       .map(([x, y, r]) => `<circle cx="${x}" cy="${y}" r="${r}" fill="${c}"/>`).join(""),
     bun: (c) => `<circle cx="32" cy="16" r="5.5" fill="${c}"/>` + hairTop.long(c),
     none: () => "",
   };
+  const beards = {
+    santa: () => `<path d="M17 37 Q17 58 32 59 Q47 58 47 37 Q44 44 38 44.5 Q32 47 26 44.5 Q20 44 17 37 Z" fill="${HAIR.white}"/>` +
+      `<path d="M24.5 43.2 Q28.5 40 32 42.6 Q35.5 40 39.5 43.2 Q36 46 32 44.6 Q28 46 24.5 43.2 Z" fill="#fff" stroke="#ddd" stroke-width=".6"/>`,
+    full: (c) => `<path d="M17.5 37 Q18 53 32 54 Q46 53 46.5 37 Q44 43 38 43.5 Q32 46.5 26 43.5 Q20 43 17.5 37 Z" fill="${c}"/>`,
+    short: (c) => `<path d="M19 40 Q21 50 32 51 Q43 50 45 40 Q42 45 38 45.5 Q32 47.5 26 45.5 Q22 45 19 40 Z" fill="${c}" opacity=".9"/>`,
+  };
+  const mustache = (c) => `<path d="M25.5 42.3 Q28.5 39.6 32 41.6 Q35.5 39.6 38.5 42.3 Q35.5 44 32 42.9 Q28.5 44 25.5 42.3 Z" fill="${c}"/>`;
+  const lashes = () => `<path d="M24.3 34.2 L22.9 33.3 M25.2 33.3 L24.5 32.1 M39.7 34.2 L41.1 33.3 M38.8 33.3 L39.5 32.1" stroke="${INK}" stroke-width=".9" stroke-linecap="round"/>`;
 
-  function person({ skin, hair = "short", hairColor = HAIR.brown, hat, beard, specs, top, scarfColor, shirt = RED, bg, eyeColor }) {
+  function person({ female, skin = 0, hair = "short", hairColor = HAIR.brown, hat, beard, beardColor = hairColor, moustache,
+    specs, top, scarfColor, shirt = RED, bg }) {
     const s = SKIN[skin];
     let out = `<rect width="64" height="64" fill="${bg}"/>`;
     if (hairBack[hair]) out += hairBack[hair](hairColor);
@@ -84,13 +99,14 @@
     out += `<circle cx="17.5" cy="37" r="3.2" fill="${s}"/><circle cx="46.5" cy="37" r="3.2" fill="${s}"/>`;
     out += `<circle cx="32" cy="36" r="15" fill="${s}"/>`;
     out += (hairTop[hair] || hairTop.short)(hairColor);
-    out += eyes(26.5, 37.5, 35.5, eyeColor ? 1.5 : 1.8, eyeColor) + cheeks(23.5, 40.5, 40.5);
-    if (beard) {
-      out += `<path d="M17 37 Q17 58 32 59 Q47 58 47 37 Q44 44 38 44.5 Q32 47 26 44.5 Q20 44 17 37 Z" fill="${HAIR.white}"/>` +
-        `<path d="M24.5 43.2 Q28.5 40 32 42.6 Q35.5 40 39.5 43.2 Q36 46 32 44.6 Q28 46 24.5 43.2 Z" fill="#fff" stroke="#ddd" stroke-width=".6"/>`;
-    } else {
-      out += smile(42);
-    }
+    out += eyes(26.5, 37.5, 35.5, 1.5, EYE_GREEN) + cheeks(23.5, 40.5, 40.5);
+    if (female) out += lashes();
+    if (beard === "santa") out += beards.santa();
+    else if (beard) out += beards[beard](beardColor) + mustache(beardColor) + smile(45, 2.5);
+    else if (moustache) out += mustache(hairColor) + smile(45, 2.5);
+    else out += female
+      ? `<path d="M28 42 Q32 45.8 36 42" fill="none" stroke="${LIPS}" stroke-width="1.8" stroke-linecap="round"/>`
+      : smile(42);
     if (specs) out += glasses();
     if (scarfColor) out += scarf(scarfColor);
     if (top) out += top;
@@ -98,29 +114,34 @@
     return out;
   }
 
+  const men = [
+    { label: "Weihnachtsmann", hair: "none", hat: santaHat(), beard: "santa", shirt: RED, bg: BG.green },
+    { label: "Wichtel", hair: "short", hairColor: HAIR.brown, hat: elfHat(), shirt: GREEN, bg: BG.red },
+    { label: "Mit Bommelmütze", skin: 1, hair: "short", hairColor: HAIR.brown2, hat: beanie(RED, "#a51c2e"), scarfColor: GREEN, shirt: GREEN, bg: BG.ice },
+    { label: "Mit Vollbart und Mütze", hair: "short", hairColor: HAIR.brown, beard: "full", hat: santaHat(), shirt: GREEN, bg: BG.gold },
+    { label: "Opa", hair: "receding", hairColor: HAIR.silver, specs: true, beard: "short", scarfColor: RED, shirt: "#8b5a2b", bg: BG.teal },
+    { label: "Mit Brille und Mütze", skin: 1, hair: "side", hairColor: HAIR.brown, specs: true, hat: santaHat(), shirt: "#24406e", bg: BG.plum },
+    { label: "Rentier-Haarreif mit Locken", hair: "curly", hairColor: HAIR.brown2, top: antlerHeadband(), shirt: RED, bg: BG.navy },
+    { label: "Grauer Bart mit Mütze", hair: "short", hairColor: HAIR.grey, beard: "full", hat: beanie(GREEN, "#1f6b41"), shirt: RED, bg: BG.red },
+    { label: "Mit Schnurrbart", skin: 1, hair: "side", hairColor: HAIR.grey, moustache: true, top: earmuffs("#f4f1ea"), shirt: GREEN, bg: BG.green },
+    { label: "Engel mit Locken", hair: "curly", hairColor: HAIR.brown, top: halo(), shirt: "#f4f1ea", bg: BG.ice },
+  ];
+  const women = [
+    { label: "Weihnachtsfrau", hair: "long", hairColor: HAIR.silver, specs: true, hat: santaHat(), shirt: RED, bg: BG.teal },
+    { label: "Wichtelin", skin: 1, hair: "pigtails", hairColor: HAIR.brown, hat: elfHat(), shirt: GREEN, bg: BG.gold },
+    { label: "Engel mit langen Haaren", hair: "long", hairColor: HAIR.brown2, top: halo(), shirt: "#f4f1ea", bg: BG.navy },
+    { label: "Mit Ohrenschützern", hair: "long", hairColor: HAIR.brown, top: earmuffs("#e85d75"), scarfColor: "#f4f1ea", shirt: "#6d3b73", bg: BG.green },
+    { label: "Rentier-Haarreif mit langen Haaren", skin: 1, hair: "long", hairColor: HAIR.brown2, top: antlerHeadband(), shirt: GREEN, bg: BG.red },
+    { label: "Mit Weihnachtsmütze", hair: "bob", hairColor: HAIR.brown, hat: santaHat(), shirt: GREEN, bg: BG.plum },
+    { label: "Oma", skin: 1, hair: "bun", hairColor: HAIR.silver, specs: true, top: holly(38, 18, 0.8), shirt: "#6d3b73", bg: BG.red },
+    { label: "Mit Stechpalme", hair: "long", hairColor: HAIR.grey, top: holly(26, 22, 0.9), scarfColor: RED, shirt: GREEN, bg: BG.navy },
+    { label: "Mit Dutt", hair: "bun", hairColor: HAIR.brown, top: earmuffs(GOLD), shirt: RED, bg: BG.teal },
+    { label: "Mit Pony und Mütze", skin: 1, hair: "bob", hairColor: HAIR.grey, top: hairTop.fringe(HAIR.grey), hat: beanie(GREEN, "#1f6b41"), scarfColor: RED, shirt: "#24406e", bg: BG.gold },
+  ];
   const people = [
-    { label: "Weihnachtsmann", skin: 0, hair: "none", hat: santaHat(), beard: true, shirt: RED, bg: BG.green },
-    { label: "Weihnachtsfrau", skin: 0, hair: "long", hairColor: HAIR.grey, specs: true, hat: santaHat(), shirt: RED, bg: BG.teal },
-    { label: "Wichtel", skin: 1, hair: "short", hairColor: HAIR.brown, hat: elfHat(), shirt: GREEN, bg: BG.red },
-    { label: "Wichtelin", skin: 2, hair: "pigtails", hairColor: HAIR.red, hat: elfHat(), shirt: GREEN, bg: BG.gold },
-    { label: "Engel", skin: 0, hair: "long", hairColor: HAIR.blond, top: halo(), shirt: "#f4f1ea", bg: BG.navy },
-    { label: "Engel mit Locken", skin: 3, hair: "curly", hairColor: HAIR.black, top: halo(), shirt: "#f4f1ea", bg: BG.plum },
-    { label: "Mit Bommelmütze", skin: 1, hair: "short", hairColor: HAIR.blond, hat: beanie(RED, "#a51c2e"), scarfColor: GREEN, shirt: GREEN, bg: BG.ice },
-    { label: "Mit grüner Mütze", skin: 4, hair: "short", hairColor: HAIR.black, hat: beanie(GREEN, "#1f6b41"), scarfColor: RED, shirt: "#24406e", bg: BG.gold },
-    { label: "Mit Ohrenschützern", skin: 2, hair: "long", hairColor: HAIR.brown, top: earmuffs("#e85d75"), scarfColor: "#f4f1ea", shirt: "#6d3b73", bg: BG.teal },
-    { label: "Mit Brille und Ohrenschützern", skin: 3, hair: "short", hairColor: HAIR.dark, specs: true, top: earmuffs("#f4f1ea"), shirt: GREEN, bg: BG.red },
-    { label: "Rentier-Haarreif", skin: 0, hair: "long", hairColor: HAIR.red, top: antlerHeadband(), shirt: GREEN, bg: BG.green },
-    { label: "Rentier-Haarreif mit Locken", skin: 4, hair: "curly", hairColor: HAIR.black, top: antlerHeadband(), shirt: RED, bg: BG.navy },
-    { label: "Mit Weihnachtsmütze", skin: 3, hair: "long", hairColor: HAIR.dark, hat: santaHat(), shirt: GREEN, bg: BG.teal },
-    { label: "Mit Brille und Mütze", skin: 1, hair: "short", hairColor: HAIR.brown, specs: true, hat: santaHat(), shirt: "#24406e", bg: BG.plum },
-    { label: "Opa", skin: 0, hair: "short", hairColor: HAIR.grey, specs: true, hat: beanie("#24406e", "#1a2f52", false), scarfColor: RED, shirt: "#8b5a2b", bg: BG.gold },
-    { label: "Oma", skin: 1, hair: "bun", hairColor: HAIR.grey, specs: true, top: holly(38, 18, 0.8), shirt: "#6d3b73", bg: BG.red },
-    { label: "Mit Stechpalme", skin: 2, hair: "long", hairColor: HAIR.blond, top: holly(26, 22, 0.9), scarfColor: RED, shirt: GREEN, bg: BG.navy },
-    { label: "Mit Dutt", skin: 4, hair: "bun", hairColor: HAIR.black, top: earmuffs(GOLD), shirt: RED, bg: BG.green },
-    { label: "Lockenkopf mit Mütze", skin: 2, hair: "curly", hairColor: HAIR.brown, hat: santaHat(), shirt: GREEN, bg: BG.gold },
-    { label: "Elf mit Brille", skin: 3, hair: "short", hairColor: HAIR.red, specs: true, hat: elfHat(), shirt: RED, bg: BG.ice },
-  ].map((p) => ({ label: p.label, svg: person(p) }));
-
+    ...men.map((p) => ({ label: p.label, svg: person(p) })),
+    ...women.map((p) => ({ label: p.label, svg: person({ ...p, female: true }) })),
+  ];
   // ---------- animals ----------
   const reindeer = () => {
     const l = "M25 26 L20 12 M21.7 17 L14 13 M20 12 L17.5 6 M20.8 14.5 L24.5 8";
