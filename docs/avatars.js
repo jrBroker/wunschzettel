@@ -1,4 +1,5 @@
-// 40 Christmas avatars (20 people, 20 animals), drawn as 64x64 SVG. The id is stored per user (1-40).
+// Christmas avatars (people, animals, family cats), drawn as 64x64 SVG. The id is stored per user;
+// only ever append new ones so existing ids keep their picture. Keep AVATAR_COUNT in the worker in sync.
 (() => {
   const INK = "#2b1d16";
   const RED = "#d7263d";
@@ -7,8 +8,12 @@
   const BG = { green: "#1f6f4a", red: "#b8323f", gold: "#d99a2b", navy: "#24406e", plum: "#6d3b73", teal: "#1f7a7a", ice: "#5b8fb9" };
 
   // ---------- shared parts ----------
-  const eyes = (x1, x2, y, r = 1.8) =>
-    `<circle cx="${x1}" cy="${y}" r="${r}" fill="${INK}"/><circle cx="${x2}" cy="${y}" r="${r}" fill="${INK}"/>` +
+  const EYE_GREEN = "#43a047";
+  const eyes = (x1, x2, y, r = 1.8, iris) =>
+    (iris
+      ? `<circle cx="${x1}" cy="${y}" r="${r + 1}" fill="${iris}"/><circle cx="${x2}" cy="${y}" r="${r + 1}" fill="${iris}"/>` +
+        `<circle cx="${x1}" cy="${y}" r="${r * 0.6}" fill="${INK}"/><circle cx="${x2}" cy="${y}" r="${r * 0.6}" fill="${INK}"/>`
+      : `<circle cx="${x1}" cy="${y}" r="${r}" fill="${INK}"/><circle cx="${x2}" cy="${y}" r="${r}" fill="${INK}"/>`) +
     `<circle cx="${x1 + 0.6}" cy="${y - 0.6}" r="0.55" fill="#fff"/><circle cx="${x2 + 0.6}" cy="${y - 0.6}" r="0.55" fill="#fff"/>`;
   const cheeks = (x1, x2, y) =>
     `<circle cx="${x1}" cy="${y}" r="2.6" fill="#ff6f7d" opacity=".4"/><circle cx="${x2}" cy="${y}" r="2.6" fill="#ff6f7d" opacity=".4"/>`;
@@ -71,7 +76,7 @@
     none: () => "",
   };
 
-  function person({ skin, hair = "short", hairColor = HAIR.brown, hat, beard, specs, top, scarfColor, shirt = RED, bg }) {
+  function person({ skin, hair = "short", hairColor = HAIR.brown, hat, beard, specs, top, scarfColor, shirt = RED, bg, eyeColor }) {
     const s = SKIN[skin];
     let out = `<rect width="64" height="64" fill="${bg}"/>`;
     if (hairBack[hair]) out += hairBack[hair](hairColor);
@@ -79,7 +84,7 @@
     out += `<circle cx="17.5" cy="37" r="3.2" fill="${s}"/><circle cx="46.5" cy="37" r="3.2" fill="${s}"/>`;
     out += `<circle cx="32" cy="36" r="15" fill="${s}"/>`;
     out += (hairTop[hair] || hairTop.short)(hairColor);
-    out += eyes(26.5, 37.5, 35.5) + cheeks(23.5, 40.5, 40.5);
+    out += eyes(26.5, 37.5, 35.5, eyeColor ? 1.5 : 1.8, eyeColor) + cheeks(23.5, 40.5, 40.5);
     if (beard) {
       out += `<path d="M17 37 Q17 58 32 59 Q47 58 47 37 Q44 44 38 44.5 Q32 47 26 44.5 Q20 44 17 37 Z" fill="${HAIR.white}"/>` +
         `<path d="M24.5 43.2 Q28.5 40 32 42.6 Q35.5 40 39.5 43.2 Q36 46 32 44.6 Q28 46 24.5 43.2 Z" fill="#fff" stroke="#ddd" stroke-width=".6"/>`;
@@ -163,17 +168,37 @@
     `<path d="M30.4 41 L33.6 41 L32 43 Z" fill="#f08aa0"/>` +
     `<path d="M32 43 V44.5 M32 44.5 Q30.2 46.6 28.6 45.2 M32 44.5 Q33.8 46.6 35.4 45.2" fill="none" stroke="${INK}" stroke-width="1.2" stroke-linecap="round"/>` +
     `<path d="M20 42 H26 M20 44.5 L26 43.5 M44 42 H38 M44 44.5 L38 43.5" stroke="#9a9a9a" stroke-width=".8"/>`;
-  const cat = () => {
+  // A cat face; the defaults give the ginger tabby, options give white cats with patches and green eyes.
+  const catFace = ({ fur = "#f0a050", earL = fur, earR = fur, innerEar = "#f6c3cf", stripes = "#d27a2a", patches = "",
+    muzzle = "#fff4e8", iris, line = INK, whisker = "#8a5a2a" } = {}) => {
     const ear = "M17 31 L18 15 L28.5 23 Z";
     const inner = "M19.5 26.5 L20 19 L25.5 23.5 Z";
-    return `<path d="${ear}" fill="#f0a050"/><path d="${mirror(ear)}" fill="#f0a050"/>` +
-      `<path d="${inner}" fill="#f6c3cf"/><path d="${mirror(inner)}" fill="#f6c3cf"/>` +
-      `<circle cx="32" cy="37" r="15" fill="#f0a050"/>` +
-      `<path d="M32 22.5 V27.5 M28 23.2 L29 27.2 M36 23.2 L35 27.2" stroke="#d27a2a" stroke-width="2" stroke-linecap="round"/>` +
-      `<ellipse cx="32" cy="43" rx="6.5" ry="4.6" fill="#fff4e8"/>` + eyes(26.5, 37.5, 35) + cheeks(22.5, 41.5, 40) +
+    return `<path d="${ear}" fill="${earL}"/><path d="${mirror(ear)}" fill="${earR}"/>` +
+      `<path d="${inner}" fill="${innerEar}"/><path d="${mirror(inner)}" fill="${innerEar}"/>` +
+      `<circle cx="32" cy="37" r="15" fill="${fur}"/>` + patches +
+      (stripes ? `<path d="M32 22.5 V27.5 M28 23.2 L29 27.2 M36 23.2 L35 27.2" stroke="${stripes}" stroke-width="2" stroke-linecap="round"/>` : "") +
+      `<ellipse cx="32" cy="43" rx="6.5" ry="4.6" fill="${muzzle}"/>` + eyes(26.5, 37.5, 35, iris ? 1.5 : 1.8, iris) + cheeks(22.5, 41.5, 40) +
       `<path d="M30.4 40.3 L33.6 40.3 L32 42.2 Z" fill="#f08aa0"/>` +
-      `<path d="M32 42.2 V43.4 M32 43.4 Q30.4 45.2 29 44 M32 43.4 Q33.6 45.2 35 44" fill="none" stroke="${INK}" stroke-width="1.1" stroke-linecap="round"/>` +
-      `<path d="M18 41 H25 M18.5 44 L25 42.6 M46 41 H39 M45.5 44 L39 42.6" stroke="#8a5a2a" stroke-width=".8"/>`;
+      `<path d="M32 42.2 V43.4 M32 43.4 Q30.4 45.2 29 44 M32 43.4 Q33.6 45.2 35 44" fill="none" stroke="${line}" stroke-width="1.1" stroke-linecap="round"/>` +
+      `<path d="M18 41 H25 M18.5 44 L25 42.6 M46 41 H39 M45.5 44 L39 42.6" stroke="${whisker}" stroke-width=".8"/>`;
+  };
+  const cat = () => catFace();
+
+  // British Shorthair (BKH): broad round head, chubby cheeks, small rounded ears, big round eyes.
+  const bkhFace = ({ fur, shade, marks, chin, nose, iris }) => {
+    // Curved paths, so both sides are written out (mirror() only handles straight segments).
+    const ears = "M17.5 30 Q16 17.5 27.5 22.5 Z M46.5 30 Q48 17.5 36.5 22.5 Z";
+    const inner = "M19.6 27.4 Q19.4 21.2 24.8 23.4 Z M44.4 27.4 Q44.6 21.2 39.2 23.4 Z";
+    return `<path d="${ears}" fill="${shade || fur}"/><path d="${inner}" fill="#e8b4be"/>` +
+      `<ellipse cx="32" cy="38" rx="17.5" ry="15.5" fill="${fur}"/>` +
+      (shade ? `<path d="M14.6 36 Q15 22.5 32 22.5 Q49 22.5 49.4 36 Q41 30.5 32 30.5 Q23 30.5 14.6 36 Z" fill="${shade}" opacity=".6"/>` : "") +
+      (marks ? `<path d="M25 30.5 L27.3 25.3 L32 29.3 L36.7 25.3 L39 30.5 M32 29.3 V24" fill="none" stroke="${marks}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>` +
+        `<path d="M15.2 36.5 Q19.5 34.8 22 38 M15.6 41 Q19.5 40 21.2 42.6 M48.8 36.5 Q44.5 34.8 42 38 M48.4 41 Q44.5 40 42.8 42.6" fill="none" stroke="${marks}" stroke-width="1.7" stroke-linecap="round"/>` : "") +
+      `<circle cx="28.4" cy="43.6" r="4.7" fill="${chin}"/><circle cx="35.6" cy="43.6" r="4.7" fill="${chin}"/>` +
+      eyes(25.5, 38.5, 35.5, 2.1, iris) + cheeks(21.5, 42.5, 41) +
+      `<path d="M30.2 40.4 L33.8 40.4 L32 42.5 Z" fill="${nose}"/>` +
+      `<path d="M32 42.5 V43.8" stroke="${INK}" stroke-width="1" stroke-linecap="round"/>` +
+      `<path d="M17 43 H24 M17.5 46 L24 44.6 M47 43 H40 M46.5 46 L40 44.6" stroke="#ffffff" stroke-width=".8" opacity=".8"/>`;
   };
   const dog = () =>
     `<circle cx="32" cy="38" r="14" fill="#c98b55"/><ellipse cx="38" cy="34" rx="5" ry="5.5" fill="#a86d3d"/>` +
@@ -228,8 +253,38 @@
     { label: "Maus mit Schal", svg: animal(mouse, BG.red, scarf(GREEN, "#fff", 3)) },
   ];
 
-  const all = [...people, ...animals];
-  window.AVATARS = all.map((a, i) => ({ id: i + 1, label: a.label, kind: i < people.length ? "person" : "animal", svg: a.svg }));
+  // Family cats: white with dark brown or grey patches, black cats, and two British Shorthairs; green eyes.
+  const WHITE = "#f7f5f0";
+  const BROWN = "#4e3324";
+  const GREY = "#8e9098";
+  const capGrey = `<path d="M18.5 31 Q20 23 32 22 Q44 23 45.5 31 Q39 27.5 32 29.5 Q25 27.5 18.5 31 Z" fill="${GREY}"/>`;
+  const white = (patches, ears = {}) => ({ fur: WHITE, stripes: null, muzzle: "#ffffff", iris: EYE_GREEN, whisker: "#b9b2a8", patches, ...ears });
+  const black = (iris, muzzle = "#30303a", line = "#d8d8e0") =>
+    ({ fur: "#22222a", stripes: null, innerEar: "#6b4b55", muzzle, iris, line, whisker: "#a0a0ab" });
+
+  const cats = [
+    { label: "Weiße Katze mit braunen Flecken",
+      svg: animal(() => catFace(white(`<ellipse cx="38.5" cy="32" rx="6.8" ry="6.2" fill="${BROWN}"/>`, { earR: BROWN })), BG.green, santaHat(0)) },
+    { label: "Weiße Katze mit grauer Kappe",
+      svg: animal(() => catFace(white(capGrey, { earL: GREY, earR: GREY })), BG.red, scarf(GREEN, "#fff", 2)) },
+    { label: "Weiße Katze mit braunem Fleck",
+      svg: animal(() => catFace(white(`<ellipse cx="25.5" cy="32" rx="6.8" ry="6.2" fill="${BROWN}"/><circle cx="41" cy="45.5" r="2.6" fill="${BROWN}"/>`, { earL: BROWN })), BG.navy, bellCollar(1)) },
+    { label: "Weiße Katze mit grauen Flecken",
+      svg: animal(() => catFace(white(capGrey + `<ellipse cx="38.5" cy="33" rx="6.4" ry="5.6" fill="${GREY}"/>`, { earL: GREY, earR: GREY })), BG.teal, holly(43, 24, 0.75)) },
+    { label: "Schwarze Katze mit Mütze", svg: animal(() => catFace(black(EYE_GREEN)), BG.gold, santaHat(0)) },
+    { label: "Schwarze Katze mit Schal", svg: animal(() => catFace(black("#e0a526")), BG.ice, scarf(RED, "#fff", 2)) },
+    { label: "Schwarze Katze mit weißer Schnauze", svg: animal(() => catFace(black(EYE_GREEN, "#f4f2ee", INK)), BG.plum, bellCollar(1)) },
+    { label: "Silver-Tabby-BKH",
+      svg: animal(() => bkhFace({ fur: "#c3c6cc", marks: "#3f4249", chin: "#e4e6ea", nose: "#c9707a", iris: EYE_GREEN }), BG.red, scarf(GREEN, "#fff", 3)) },
+    { label: "Golden-Shaded-BKH",
+      svg: animal(() => bkhFace({ fur: "#ecca8a", shade: "#a8772f", chin: "#f8ead0", nose: "#c98370", iris: EYE_GREEN }), BG.green, bellCollar(2), holly(44, 23, 0.7)) },
+  ];
+
+  window.AVATARS = [
+    ...people.map((a) => ({ ...a, kind: "person" })),
+    ...animals.map((a) => ({ ...a, kind: "animal" })),
+    ...cats.map((a) => ({ ...a, kind: "cat" })),
+  ].map((a, i) => ({ id: i + 1, label: a.label, kind: a.kind, svg: a.svg }));
   window.avatarSvg = (id) => {
     const a = window.AVATARS[id - 1];
     return a ? `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">${a.svg}</svg>` : null;

@@ -343,7 +343,8 @@ await test("unreachable link: preview returns no image, wish stays", async () =>
 
 await test("avatar: set, shown everywhere, invalid rejected, reset", async () => {
   assert.equal((await call("GET", "/api/me", { token: carl.token })).data.user.avatar, null);
-  for (const bad of [0, 41, 2.5, "3", -1]) {
+  assert.equal((await call("PUT", "/api/me/avatar", { token: carl.token, body: { avatar: 49 } })).status, 200, "last cat");
+  for (const bad of [0, 50, 2.5, "3", -1]) {
     assert.equal((await call("PUT", "/api/me/avatar", { token: carl.token, body: { avatar: bad } })).status, 400, String(bad));
   }
   const r = await call("PUT", "/api/me/avatar", { token: carl.token, body: { avatar: 21 } });

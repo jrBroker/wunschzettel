@@ -173,7 +173,7 @@ function publicUser(u) {
   return { id: u.id, name: u.name, is_admin: !!u.is_admin, avatar: u.avatar ?? null };
 }
 
-const AVATAR_COUNT = 40; // must match docs/avatars.js
+const AVATAR_COUNT = 49; // must match docs/avatars.js
 
 async function setAvatar(request, env, me) {
   const { avatar } = await body(request);

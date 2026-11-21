@@ -687,7 +687,9 @@
         h("h3", { class: "sub-title" }, "Menschen"),
         h("div", { class: "avatar-grid" }, group("person")),
         h("h3", { class: "sub-title" }, "Tiere"),
-        h("div", { class: "avatar-grid" }, group("animal"),
+        h("div", { class: "avatar-grid" }, group("animal")),
+        h("h3", { class: "sub-title" }, "Katzen"),
+        h("div", { class: "avatar-grid" }, group("cat"),
           option(null, h("span", { class: "avatar-letter" }, [...me.name][0].toUpperCase()), "Kein Avatar, nur Anfangsbuchstabe")));
     }
 
