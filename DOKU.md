@@ -346,8 +346,9 @@ die Katzen `catFace()` und `bkhFace()`.
 Setzt `window.DAILY_TEXTS` und `window.dailyTextFor(date)`. Vorrang bei der Auswahl:
 1. Sondertage (6.12., 24.12., 25.12., 26.12., 31.12.). Heiligabend schlägt den 4. Advent.
 2. Adventssonntage. Ein Advent schlägt Nikolaus, wenn beide auf denselben Tag fallen.
-3. Sonst einer der 40 allgemeinen Texte, reihum nach Datum gewählt. Alle sehen also am selben
-   Tag denselben Text, und er wechselt um Mitternacht.
+3. Sonst einer der 40 allgemeinen Texte, bei jedem Aufruf der Startseite zufällig gewählt.
+   Derselbe Text kommt nie zweimal hintereinander. Dafür merkt sich der Browser den letzten
+   Text in `localStorage` unter `wunschzettel-last-text`.
 
 ---
 

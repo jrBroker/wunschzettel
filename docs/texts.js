@@ -1,4 +1,4 @@
-// Daily family texts on the start page. Edit or add freely; one is picked per day.
+// Daily family texts on the start page. Edit or add freely; a general one is picked at random on each visit, special days stay fixed.
 window.DAILY_TEXTS = {
   general: [
     "Familie ist der Ort, an dem man nichts beweisen muss, um geliebt zu werden.",
@@ -73,6 +73,11 @@ window.dailyTextFor = (date) => {
     if (sunday.getTime() === day.getTime()) return T.advent[n - 1];
   }
   if (T.special[key]) return T.special[key];
-  const dayNumber = Math.round(Date.UTC(y, date.getMonth(), date.getDate()) / 86400000);
-  return T.general[dayNumber % T.general.length];
+  // A new random text on every visit, never the same one twice in a row.
+  let last = -1;
+  try { last = Number(localStorage.getItem("wunschzettel-last-text") ?? -1); } catch {}
+  let i = Math.floor(Math.random() * (T.general.length - 1));
+  if (i >= last && last >= 0) i++;
+  try { localStorage.setItem("wunschzettel-last-text", String(i)); } catch {}
+  return T.general[i];
 };
