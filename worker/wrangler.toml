@@ -1,0 +1,12 @@
+name = "wunschliste-api"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+
+# Comma-separated origins allowed to call the API (your GitHub Pages URL goes here).
+[vars]
+ALLOWED_ORIGINS = "https://jrbroker.github.io,http://localhost:8080,http://127.0.0.1:8080"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "wunschliste"
+database_id = "a5cd24f7-f69c-4ba5-8e09-676cb5d94f81"
