@@ -244,9 +244,11 @@
           h("h1", null, "Hallo ", h("em", null, me.name), ","),
           h("p", null, "hier sind die Wunschzettel der ganzen Familie.")),
         h("div", { class: "countdown" },
-          days === 0
-            ? h("span", null, h("strong", null, "Heute"), " ist Heiligabend!")
-            : [h("strong", null, String(days)), h("span", null, days === 1 ? "Tag bis" : "Tage bis", h("br"), "Heiligabend")])),
+          days < 0
+            ? h("span", null, h("strong", null, "Frohe"), " Weihnachten!")
+            : days === 0
+              ? h("span", null, h("strong", null, "Heute"), " ist Heiligabend!")
+              : [h("strong", null, String(days)), h("span", null, days === 1 ? "Tag bis" : "Tage bis", h("br"), "Heiligabend")])),
       window.dailyTextFor
         ? h("figure", { class: "daily" }, icons.star("daily-star"),
           h("blockquote", null, window.dailyTextFor(today)))
