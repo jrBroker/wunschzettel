@@ -3,7 +3,13 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT NOT NULL UNIQUE COLLATE NOCASE,
   pw_hash TEXT NOT NULL,
   pw_salt TEXT NOT NULL,
+  is_admin INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS sessions (

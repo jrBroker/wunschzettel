@@ -623,6 +623,157 @@
     draw();
   }
 
+  function inviteLink(code) {
+    return `${location.origin}${location.pathname}#/einladung/${encodeURIComponent(code)}`;
+  }
+  async function copyInvite(code) {
+    const link = inviteLink(code);
+    try {
+      await navigator.clipboard.writeText(link);
+      toast("Einladungslink kopiert. Schick ihn an die Familie!");
+    } catch {
+      prompt("Diesen Link an die Familie schicken:", link);
+    }
+  }
+
+  // --- account page (password, logout) + admin tools ---
+  async function accountView() {
+    showLoading();
+    const { user } = await api("GET", "/api/me");
+    setSession(token, user); // picks up admin flag or a rename done by an admin
+    const users = user.is_admin ? (await api("GET", "/api/users")).users : [];
+    const state = { users, open: null, confirmInvite: null };
+
+    function draw() {
+      const y = window.scrollY;
+      render(
+        h("a", { class: "back", href: "#/" }, "← Zur Familie"),
+        h("div", { class: "list-head" }, avatar(me.name),
+          h("div", null, h("h1", null, me.name), me.is_admin ? h("span", { class: "tag" }, "Admin") : null)),
+        passwordCard(),
+        me.is_admin ? adminCard() : null,
+        h("div", { class: "account-footer" },
+          h("button", { class: "btn btn-ghost", type: "button", onclick: logout }, "Abmelden")));
+      window.scrollTo(0, y);
+    }
+
+    function passwordCard() {
+      const err = h("p", { class: "form-error", role: "alert" });
+      const cur = h("input", { class: "input", id: "pw-cur", type: "password", autocomplete: "current-password", required: true });
+      const pw1 = h("input", { class: "input", id: "pw-new", type: "password", autocomplete: "new-password", minlength: "6", required: true });
+      const pw2 = h("input", { class: "input", id: "pw-rep", type: "password", autocomplete: "new-password", minlength: "6", required: true });
+      const btn = h("button", { class: "btn btn-gold", type: "submit" }, "Passwort ändern");
+      return h("section", { class: "card panel" },
+        h("h2", { class: "panel-title" }, "Passwort ändern"),
+        h("form", { class: "stack", onsubmit: async (e) => {
+          e.preventDefault();
+          err.textContent = "";
+          if (pw1.value !== pw2.value) { err.textContent = "Die neuen Passwörter stimmen nicht überein."; return; }
+          btn.disabled = true;
+          try {
+            await api("POST", "/api/me/password", { current: cur.value, password: pw1.value });
+            toast("Passwort geändert. Andere Geräte sind jetzt abgemeldet.");
+            cur.value = pw1.value = pw2.value = "";
+          } catch (ex) { err.textContent = ex.message; }
+          btn.disabled = false;
+        } },
+          h("div", { class: "field" }, h("label", { for: "pw-cur" }, "Aktuelles Passwort"), cur),
+          h("div", { class: "field" }, h("label", { for: "pw-new" }, "Neues Passwort (mind. 6 Zeichen)"), pw1),
+          h("div", { class: "field" }, h("label", { for: "pw-rep" }, "Neues Passwort wiederholen"), pw2),
+          err, h("div", null, btn)));
+    }
+
+    function adminCard() {
+      return h("section", { class: "card panel" },
+        h("h2", { class: "panel-title" }, "Verwaltung"),
+        h("p", { class: "muted" }, "Auch als Admin siehst du nicht, wer dir etwas schenkt."),
+        h("h3", { class: "sub-title" }, "Einladungslink"),
+        h("div", { class: "row-wrap" },
+          h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: async () => {
+            try { await copyInvite((await api("GET", "/api/invite")).invite); } catch (e) { toast(e.message, true); }
+          } }, "Link kopieren"),
+          state.confirmInvite === "invite"
+            ? [h("span", { class: "warn" }, "Der alte Link funktioniert danach nicht mehr."),
+              h("button", { class: "btn btn-primary btn-sm", type: "button", onclick: async () => {
+                state.confirmInvite = null;
+                try { const { invite } = await api("POST", "/api/admin/invite"); draw(); await copyInvite(invite); }
+                catch (e) { toast(e.message, true); draw(); }
+              } }, "Ja, neuen Link erstellen"),
+              h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { state.confirmInvite = null; draw(); } }, "Abbrechen")]
+            : h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { state.confirmInvite = "invite"; draw(); } }, "Neuen Link erstellen")),
+        h("h3", { class: "sub-title" }, "Familienmitglieder"),
+        h("ul", { class: "admin-list" }, state.users.map(adminRow)));
+    }
+
+    function adminRow(u) {
+      const self = u.id === me.id;
+      const open = state.open && state.open.id === u.id ? state.open.kind : null;
+      let panel = null;
+      if (open === "rename") {
+        const input = h("input", { class: "input", value: u.name, maxlength: "30", required: true, "aria-label": "Neuer Name" });
+        panel = h("form", { class: "inline-form", onsubmit: async (e) => {
+          e.preventDefault();
+          try {
+            const r = await api("PUT", `/api/admin/users/${u.id}`, { name: input.value });
+            u.name = r.user.name;
+            if (self) setSession(token, { ...me, name: u.name });
+            state.open = null; draw(); toast("Name geändert");
+          } catch (ex) { toast(ex.message, true); }
+        } }, input, h("button", { class: "btn btn-gold btn-sm", type: "submit" }, "Speichern"), cancelBtn());
+        setTimeout(() => input.focus());
+      } else if (open === "password") {
+        const input = h("input", { class: "input", value: suggestPassword(), minlength: "6", required: true, "aria-label": "Vorläufiges Passwort" });
+        panel = h("form", { class: "inline-form", onsubmit: async (e) => {
+          e.preventDefault();
+          try {
+            await api("POST", `/api/admin/users/${u.id}/password`, { password: input.value });
+            state.open = null; draw();
+            toast(`Neues Passwort für ${u.name} gesetzt. Jetzt einfach weitergeben.`);
+          } catch (ex) { toast(ex.message, true); }
+        } },
+          h("span", { class: "muted small" }, "Vorläufiges Passwort, das du weitergibst:"),
+          input, h("button", { class: "btn btn-gold btn-sm", type: "submit" }, "Setzen"), cancelBtn());
+      } else if (open === "delete") {
+        panel = h("div", { class: "inline-form" },
+          h("span", { class: "warn" }, `${u.name} mit allen Wünschen, Markierungen und Notizen entfernen?`),
+          h("button", { class: "btn btn-primary btn-sm", type: "button", onclick: async () => {
+            try {
+              await api("DELETE", `/api/admin/users/${u.id}`);
+              state.users = state.users.filter((x) => x.id !== u.id);
+              state.open = null; draw(); toast(`${u.name} wurde entfernt`);
+            } catch (ex) { toast(ex.message, true); }
+          } }, "Endgültig entfernen"), cancelBtn());
+      }
+      const action = (kind, label) => h("button", { class: "btn btn-ghost btn-sm" + (open === kind ? " active" : ""), type: "button",
+        onclick: () => { state.open = open === kind ? null : { id: u.id, kind }; draw(); } }, label);
+      return h("li", { class: "admin-row" },
+        h("div", { class: "admin-person" }, avatar(u.name), h("strong", null, u.name), self ? h("span", { class: "tag" }, "Du") : null),
+        h("div", { class: "row-wrap" },
+          action("rename", "Umbenennen"),
+          self ? null : action("password", "Passwort zurücksetzen"),
+          self ? null : action("delete", "Entfernen")),
+        panel);
+    }
+
+    function cancelBtn() {
+      return h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { state.open = null; draw(); } }, "Abbrechen");
+    }
+
+    draw();
+  }
+
+  function suggestPassword() {
+    const words = ["Stern", "Kerze", "Schnee", "Engel", "Glocke", "Zimt", "Tanne", "Rentier", "Keks", "Schlitten"];
+    const n = crypto.getRandomValues(new Uint32Array(2));
+    return `${words[n[0] % words.length]}-${1000 + (n[1] % 9000)}`;
+  }
+
+  async function logout() {
+    try { await api("POST", "/api/logout"); } catch {}
+    clearSession();
+    goHome();
+  }
+
   function showError(e) {
     if (e.status === 401) return;
     render(h("div", { class: "card auth-card", style: "margin:40px auto" },
@@ -652,31 +803,21 @@
     }
     const list = hash.match(/^\/liste\/(\d+)$/);
     document.getElementById("shopBtn").classList.toggle("active", hash === "/einkauf");
+    document.getElementById("accountBtn").classList.toggle("active", hash === "/konto");
     try {
       if (list) await listView(Number(list[1]));
       else if (hash === "/einkauf") await shoppingView();
+      else if (hash === "/konto") await accountView();
       else await homeView();
     } catch (e) {
       showError(e);
     }
   }
 
-  document.getElementById("logoutBtn").addEventListener("click", async () => {
-    try { await api("POST", "/api/logout"); } catch {}
-    clearSession();
-    goHome();
-  });
-
   document.getElementById("inviteBtn").addEventListener("click", async () => {
     try {
       const { invite } = await api("GET", "/api/invite");
-      const link = `${location.origin}${location.pathname}#/einladung/${encodeURIComponent(invite)}`;
-      try {
-        await navigator.clipboard.writeText(link);
-        toast("Einladungslink kopiert. Schick ihn an die Familie!");
-      } catch {
-        prompt("Diesen Link an die Familie schicken:", link);
-      }
+      await copyInvite(invite);
     } catch (e) { toast(e.message, true); }
   });
 

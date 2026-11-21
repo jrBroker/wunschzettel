@@ -1,9 +1,9 @@
-// Runs against a local `wrangler dev` (default http://localhost:8787) with INVITE_CODE=lokaler-test-code.
+// Runs against a local `wrangler dev` (default http://localhost:8787).
+// Needs a local admin account: ADMIN_NAME / ADMIN_PASSWORD (default Iwan / testpass1).
 import assert from "node:assert/strict";
 import { extractImage } from "../src/index.js";
 
 const API = process.env.API_URL || "http://localhost:8787";
-const INVITE = process.env.INVITE_CODE || "lokaler-test-code";
 const suffix = Date.now().toString(36);
 
 async function call(method, path, { token, body, origin } = {}) {
@@ -58,6 +58,15 @@ await test("extractImage: no image / javascript: rejected", () => {
 });
 
 // ---------- accounts ----------
+
+const admin = { name: process.env.ADMIN_NAME || "Iwan", password: process.env.ADMIN_PASSWORD || "testpass1" };
+{
+  const r = await call("POST", "/api/login", { body: admin });
+  assert.equal(r.status, 200, "admin login failed – is the local admin account set up?");
+  admin.token = r.data.token;
+  admin.id = r.data.user.id;
+}
+const INVITE = (await call("GET", "/api/invite", { token: admin.token })).data.invite;
 
 const anna = { name: `Anna ${suffix}`, password: "geheim123" };
 const ben = { name: `Ben ${suffix}`, password: "geheim456" };
@@ -328,6 +337,100 @@ await test("unreachable link: preview returns no image, wish stays", async () =>
   assert.equal(p.status, 200);
   assert.equal(p.data.wish.image_url, null);
   assert.equal(p.data.wish.title, "Nix");
+});
+
+// ---------- own password ----------
+
+await test("change own password: wrong current, too short, success", async () => {
+  assert.equal((await call("POST", "/api/me/password", { token: ben.token, body: { current: "falsch", password: "neues123" } })).status, 403);
+  assert.equal((await call("POST", "/api/me/password", { token: ben.token, body: { current: ben.password, password: "123" } })).status, 400);
+  const other = (await call("POST", "/api/login", { body: ben })).data.token; // a second device
+  const r = await call("POST", "/api/me/password", { token: ben.token, body: { current: ben.password, password: "neues123" } });
+  assert.equal(r.status, 200);
+  assert.equal((await call("GET", "/api/me", { token: ben.token })).status, 200, "current device stays signed in");
+  assert.equal((await call("GET", "/api/me", { token: other })).status, 401, "other devices are signed out");
+  assert.equal((await call("POST", "/api/login", { body: ben })).status, 401, "old password no longer works");
+  ben.password = "neues123";
+  assert.equal((await call("POST", "/api/login", { body: ben })).status, 200);
+});
+
+// ---------- admin ----------
+
+await test("/api/me reports admin flag", async () => {
+  assert.equal((await call("GET", "/api/me", { token: admin.token })).data.user.is_admin, true);
+  assert.equal((await call("GET", "/api/me", { token: anna.token })).data.user.is_admin, false);
+});
+
+await test("non-admins get 403 on every admin endpoint", async () => {
+  const t = anna.token;
+  assert.equal((await call("POST", "/api/admin/invite", { token: t })).status, 403);
+  assert.equal((await call("PUT", `/api/admin/users/${ben.id}`, { token: t, body: { name: "x" + suffix } })).status, 403);
+  assert.equal((await call("DELETE", `/api/admin/users/${ben.id}`, { token: t })).status, 403);
+  assert.equal((await call("POST", `/api/admin/users/${ben.id}/password`, { token: t, body: { password: "hacked1" } })).status, 403);
+  assert.equal((await call("POST", "/api/login", { body: ben })).status, 200, "Ben's password unchanged");
+});
+
+await test("admin resets a password: old sessions end, new password works", async () => {
+  const before = (await call("POST", "/api/login", { body: anna })).data.token;
+  assert.equal((await call("POST", `/api/admin/users/${anna.id}/password`, { token: admin.token, body: { password: "12" } })).status, 400);
+  const r = await call("POST", `/api/admin/users/${anna.id}/password`, { token: admin.token, body: { password: "vorlaeufig1" } });
+  assert.equal(r.status, 200);
+  assert.equal((await call("GET", "/api/me", { token: before })).status, 401);
+  anna.password = "vorlaeufig1";
+  const l = await call("POST", "/api/login", { body: anna });
+  assert.equal(l.status, 200);
+  anna.token = l.data.token;
+  assert.equal((await call("POST", `/api/admin/users/999999/password`, { token: admin.token, body: { password: "abcdef" } })).status, 404);
+});
+
+await test("admin renames a person; clashes and bad names rejected", async () => {
+  const newName = `Anni ${suffix}`;
+  let r = await call("PUT", `/api/admin/users/${anna.id}`, { token: admin.token, body: { name: newName } });
+  assert.equal(r.status, 200);
+  assert.equal((await call("GET", "/api/me", { token: anna.token })).data.user.name, newName);
+  assert.equal((await call("PUT", `/api/admin/users/${anna.id}`, { token: admin.token, body: { name: ben.name.toLowerCase() } })).status, 409);
+  assert.equal((await call("PUT", `/api/admin/users/${anna.id}`, { token: admin.token, body: { name: "x" } })).status, 400);
+  anna.name = newName;
+  assert.equal((await call("POST", "/api/login", { body: anna })).status, 200, "login with the new name");
+});
+
+await test("admin still cannot see gift info on own list", async () => {
+  const w = (await call("POST", "/api/wishes", { token: admin.token, body: { slot: 4, title: `Admin-Wunsch ${suffix}` } })).data.wish;
+  await call("POST", `/api/wishes/${w.id}/claim`, { token: ben.token });
+  await call("POST", `/api/wishes/${w.id}/notes`, { token: ben.token, body: { text: "pssst" } });
+  const raw = JSON.stringify((await call("GET", `/api/users/${admin.id}/wishes`, { token: admin.token })).data);
+  for (const leak of ["giver", "notes", "pssst", ben.name]) assert.ok(!raw.includes(leak), leak);
+  await call("DELETE", `/api/wishes/${w.id}`, { token: admin.token });
+});
+
+await test("admin renews invite: old code dead, new code works", async () => {
+  const r = await call("POST", "/api/admin/invite", { token: admin.token });
+  assert.equal(r.status, 200);
+  const fresh = r.data.invite;
+  assert.notEqual(fresh, INVITE);
+  assert.equal((await call("GET", "/api/invite", { token: anna.token })).data.invite, fresh);
+  assert.equal((await call("POST", "/api/register", { body: { invite: INVITE, name: `Dora ${suffix}`, password: "abcdef" } })).status, 403);
+  const d = await call("POST", "/api/register", { body: { invite: fresh, name: `Dora ${suffix}`, password: "abcdef" } });
+  assert.equal(d.status, 201);
+  assert.equal(d.data.user.is_admin, false);
+  carl.dora = d.data.user.id;
+});
+
+await test("admin deletes a person with all their traces; cannot delete self", async () => {
+  // Ben gifts Anna's wish and writes a note; Anna gifts nothing. Delete Ben.
+  const annaWish = (await call("GET", `/api/users/${anna.id}/wishes`, { token: ben.token })).data.wishes[0];
+  await call("POST", `/api/wishes/${annaWish.id}/claim`, { token: ben.token });
+  await call("POST", `/api/wishes/${annaWish.id}/notes`, { token: ben.token, body: { text: "von Ben" } });
+  assert.equal((await call("DELETE", `/api/admin/users/${admin.id}`, { token: admin.token })).status, 400);
+  assert.equal((await call("DELETE", `/api/admin/users/${ben.id}`, { token: admin.token })).status, 200);
+  assert.equal((await call("GET", "/api/me", { token: ben.token })).status, 401);
+  assert.equal((await call("POST", "/api/login", { body: ben })).status, 401);
+  const users = (await call("GET", "/api/users", { token: admin.token })).data.users;
+  assert.ok(!users.some((u) => u.id === ben.id));
+  const w = (await call("GET", `/api/users/${anna.id}/wishes`, { token: admin.token })).data.wishes.find((x) => x.id === annaWish.id);
+  assert.ok(!w.givers.some((g) => g.id === ben.id), "Ben's claim gone");
+  assert.ok(!w.notes.some((n) => n.text === "von Ben"), "Ben's note gone");
+  assert.equal((await call("DELETE", `/api/admin/users/${ben.id}`, { token: admin.token })).status, 404);
 });
 
 // ---------- misc ----------

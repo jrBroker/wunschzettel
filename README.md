@@ -70,8 +70,12 @@ Danach anmelden und oben auf **Familie einladen** klicken. Der Link wird kopiert
 per WhatsApp verschickt werden.
 
 ## Gut zu wissen
-- **Passwort vergessen:** Dafür gibt es keine Funktion. Die Person kann gelöscht werden und sich neu anmelden:
-  `npx wrangler d1 execute wunschliste --remote --command "DELETE FROM users WHERE name = 'Name'"`.
-  Dabei gehen auch ihre Wünsche verloren.
-- **Einladungscode ändern:** `npx wrangler secret put INVITE_CODE` erneut ausführen. Alte Links funktionieren danach nicht mehr.
+- **Verwaltung:** Admins (`users.is_admin = 1`, aktuell Iwan) finden unter **Konto → Verwaltung**:
+  Passwort zurücksetzen, umbenennen, entfernen, Einladungslink erneuern. Jeder kann unter **Konto** sein eigenes Passwort ändern.
+- **Weiteren Admin ernennen:**
+  `npx wrangler d1 execute wunschliste --remote --command "UPDATE users SET is_admin = 1 WHERE name = 'Name'"`
+- **Einladungscode:** Ein über die Verwaltung erneuerter Code steht in der Tabelle `settings` und hat Vorrang vor dem Secret `INVITE_CODE`.
+- **Datenbank-Änderungen:** Neue Spalten/Tabellen kommen als Datei in `worker/migrations/` und werden einmalig mit
+  `npx wrangler d1 execute wunschliste --remote --file=migrations/<datei>.sql` angewendet (vorher `wrangler d1 export` als Sicherung).
+- **Tests:** Brauchen ein lokales Admin-Konto (Standard `Iwan` / `testpass1`, änderbar über `ADMIN_NAME` / `ADMIN_PASSWORD`).
 - **Gelöschte Wünsche:** Löscht jemand einen Wunsch, den schon jemand schenken wollte, verschwindet auch die Markierung.

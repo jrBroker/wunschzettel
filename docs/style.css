@@ -243,6 +243,22 @@ select.input option { background: var(--bg-2); color: var(--text); }
 .check input { accent-color: var(--green); width: 16px; height: 16px; margin: 0; cursor: pointer; }
 .check:has(input:checked) { background: var(--green-soft); border-color: rgba(111, 195, 152, 0.4); color: var(--green); }
 .wish.shop.done { opacity: .7; }
+.panel { padding: 22px; margin-top: 18px; }
+.panel-title { font-size: 1.3rem; margin-bottom: 14px; }
+.sub-title { font-family: var(--font-body); font-size: 0.8rem; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--muted); margin: 20px 0 10px; }
+.stack { display: flex; flex-direction: column; gap: 12px; max-width: 420px; }
+.row-wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.warn { color: #ffb4a6; font-size: 0.88rem; }
+.small { font-size: 0.82rem; }
+.admin-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.admin-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; border-radius: 12px; background: rgba(0, 0, 0, 0.18); }
+.admin-person { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.admin-person .avatar { width: 36px; height: 36px; font-size: 1rem; }
+.admin-person strong { overflow-wrap: anywhere; }
+.inline-form { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 4px; }
+.inline-form .input { flex: 1 1 180px; padding: 8px 12px; }
+.account-footer { margin-top: 24px; display: flex; justify-content: center; }
+.list-head .tag { margin-left: 0; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 
@@ -268,6 +284,7 @@ select.input option { background: var(--bg-2); color: var(--text); }
   .slot { padding: 16px; }
   .wish-actions.wide { flex-basis: 100%; justify-content: flex-end; }
   .thumb { width: 48px; height: 48px; }
+  .admin-row > .row-wrap { flex-basis: 100%; }
   .topbar-actions { gap: 6px; }
   .topbar-actions .btn-sm { padding: 7px 11px; }
   .countdown { width: 100%; }

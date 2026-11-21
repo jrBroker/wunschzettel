@@ -69,8 +69,19 @@ async function route(request, env) {
   const me = await authenticate(request, env);
 
   if (m === "POST" && path === "/api/logout") return logout(request, env);
-  if (m === "GET" && path === "/api/me") return json({ user: me });
-  if (m === "GET" && path === "/api/invite") return json({ invite: env.INVITE_CODE });
+  if (m === "GET" && path === "/api/me") return json({ user: publicUser(me) });
+  if (m === "GET" && path === "/api/invite") return json({ invite: await currentInvite(env) });
+  if (m === "POST" && path === "/api/me/password") return changeOwnPassword(request, env, me);
+  if (path.startsWith("/api/admin/")) {
+    if (!me.is_admin) throw new HttpError(403, "Nur für Admins");
+    if (m === "POST" && path === "/api/admin/invite") return renewInvite(env);
+    if ((match = path.match(/^\/api\/admin\/users\/(\d+)$/))) {
+      if (m === "PUT") return adminRename(request, env, Number(match[1]));
+      if (m === "DELETE") return adminDeleteUser(env, me, Number(match[1]));
+    }
+    if (m === "POST" && (match = path.match(/^\/api\/admin\/users\/(\d+)\/password$/)))
+      return adminResetPassword(request, env, Number(match[1]));
+  }
   if (m === "GET" && path === "/api/users") return listUsers(env);
   if (m === "GET" && (match = path.match(/^\/api\/users\/(\d+)\/wishes$/)))
     return listWishes(env, me, Number(match[1]));
@@ -147,13 +158,18 @@ function bearer(request) {
 async function authenticate(request, env) {
   const token = bearer(request);
   if (!token) throw new HttpError(401, "Bitte anmelden");
+  const tokenHash = await sha256(token);
   const user = await env.DB.prepare(
-    "SELECT u.id, u.name FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?"
+    "SELECT u.id, u.name, u.is_admin FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?"
   )
-    .bind(await sha256(token))
+    .bind(tokenHash)
     .first();
   if (!user) throw new HttpError(401, "Bitte anmelden");
-  return user;
+  return { id: user.id, name: user.name, is_admin: !!user.is_admin, tokenHash };
+}
+
+function publicUser(u) {
+  return { id: u.id, name: u.name, is_admin: !!u.is_admin };
 }
 
 function cleanName(name) {
@@ -162,29 +178,48 @@ function cleanName(name) {
   return name;
 }
 
-async function register(request, env) {
-  const { invite, name: rawName, password } = await body(request);
-  if (!env.INVITE_CODE || !timingSafeEqual(String(invite || ""), env.INVITE_CODE))
-    throw new HttpError(403, "Der Einladungslink ist ungültig");
-  const name = cleanName(rawName);
+function checkPassword(password) {
   if (typeof password !== "string" || password.length < 6)
     throw new HttpError(400, "Das Passwort braucht mindestens 6 Zeichen");
+  if (password.length > 200) throw new HttpError(400, "Das Passwort ist zu lang");
+}
+
+async function setPassword(env, userId, password) {
+  const salt = randomHex(16);
+  const hash = await hashPassword(password, salt);
+  await env.DB.prepare("UPDATE users SET pw_hash = ?, pw_salt = ? WHERE id = ?").bind(hash, salt, userId).run();
+}
+
+// A code renewed by an admin lives in the DB; until then the INVITE_CODE secret applies.
+async function currentInvite(env) {
+  const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'invite_code'").first();
+  return row ? row.value : env.INVITE_CODE;
+}
+
+async function register(request, env) {
+  const { invite, name: rawName, password } = await body(request);
+  const code = await currentInvite(env);
+  if (!code || !timingSafeEqual(String(invite || ""), code)) throw new HttpError(403, "Der Einladungslink ist ungültig");
+  const name = cleanName(rawName);
+  checkPassword(password);
 
   const exists = await env.DB.prepare("SELECT id FROM users WHERE name = ?").bind(name).first();
   if (exists) throw new HttpError(409, "Diesen Namen gibt es schon");
 
   const salt = randomHex(16);
   const hash = await hashPassword(password, salt);
-  const row = await env.DB.prepare("INSERT INTO users (name, pw_hash, pw_salt) VALUES (?, ?, ?) RETURNING id, name")
+  const row = await env.DB.prepare(
+    "INSERT INTO users (name, pw_hash, pw_salt) VALUES (?, ?, ?) RETURNING id, name, is_admin"
+  )
     .bind(name, hash, salt)
     .first();
   const token = await createSession(env, row.id);
-  return json({ token, user: row }, 201);
+  return json({ token, user: publicUser(row) }, 201);
 }
 
 async function login(request, env) {
   const { name, password } = await body(request);
-  const user = await env.DB.prepare("SELECT id, name, pw_hash, pw_salt FROM users WHERE name = ?")
+  const user = await env.DB.prepare("SELECT id, name, is_admin, pw_hash, pw_salt FROM users WHERE name = ?")
     .bind(String(name || "").trim().replace(/\s+/g, " "))
     .first();
   const fail = new HttpError(401, "Name oder Passwort falsch");
@@ -195,12 +230,74 @@ async function login(request, env) {
   const hash = await hashPassword(String(password || ""), user.pw_salt);
   if (!timingSafeEqual(hash, user.pw_hash)) throw fail;
   const token = await createSession(env, user.id);
-  return json({ token, user: { id: user.id, name: user.name } });
+  return json({ token, user: publicUser(user) });
 }
 
 async function logout(request, env) {
   await env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(await sha256(bearer(request))).run();
   return json({ ok: true });
+}
+
+async function changeOwnPassword(request, env, me) {
+  const { current, password } = await body(request);
+  const user = await env.DB.prepare("SELECT pw_hash, pw_salt FROM users WHERE id = ?").bind(me.id).first();
+  const hash = await hashPassword(String(current || ""), user.pw_salt);
+  if (!timingSafeEqual(hash, user.pw_hash)) throw new HttpError(403, "Das aktuelle Passwort stimmt nicht");
+  checkPassword(password);
+  await setPassword(env, me.id, password);
+  // Sign out every other device, keep this one.
+  await env.DB.prepare("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?").bind(me.id, me.tokenHash).run();
+  return json({ ok: true });
+}
+
+// ---------- admin ----------
+
+async function existingUser(env, id) {
+  const user = await env.DB.prepare("SELECT id, name, is_admin FROM users WHERE id = ?").bind(id).first();
+  if (!user) throw new HttpError(404, "Diese Person gibt es nicht");
+  return user;
+}
+
+async function adminResetPassword(request, env, id) {
+  const user = await existingUser(env, id);
+  const { password } = await body(request);
+  checkPassword(password);
+  await setPassword(env, user.id, password);
+  await env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(user.id).run();
+  return json({ ok: true });
+}
+
+async function adminRename(request, env, id) {
+  const user = await existingUser(env, id);
+  const name = cleanName((await body(request)).name);
+  const clash = await env.DB.prepare("SELECT id FROM users WHERE name = ? AND id != ?").bind(name, user.id).first();
+  if (clash) throw new HttpError(409, "Diesen Namen gibt es schon");
+  await env.DB.prepare("UPDATE users SET name = ? WHERE id = ?").bind(name, user.id).run();
+  return json({ user: publicUser({ ...user, name }) });
+}
+
+async function adminDeleteUser(env, me, id) {
+  const user = await existingUser(env, id);
+  if (user.id === me.id) throw new HttpError(400, "Du kannst dich nicht selbst entfernen");
+  const theirWishes = "SELECT id FROM wishes WHERE user_id = ?";
+  await env.DB.batch([
+    env.DB.prepare(`DELETE FROM notes WHERE user_id = ? OR wish_id IN (${theirWishes})`).bind(id, id),
+    env.DB.prepare(`DELETE FROM claims WHERE user_id = ? OR wish_id IN (${theirWishes})`).bind(id, id),
+    env.DB.prepare("DELETE FROM wishes WHERE user_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM users WHERE id = ?").bind(id),
+  ]);
+  return json({ ok: true });
+}
+
+async function renewInvite(env) {
+  const code = randomHex(12);
+  await env.DB.prepare(
+    "INSERT INTO settings (key, value) VALUES ('invite_code', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+  )
+    .bind(code)
+    .run();
+  return json({ invite: code });
 }
 
 // ---------- data ----------
