@@ -509,7 +509,7 @@ function amazonImage(html) {
   return m ? m[1] : null;
 }
 
-async function fetchPreviewImage(link) {
+export async function fetchPreviewImage(link) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 5000);
   try {
@@ -532,29 +532,44 @@ async function fetchPreviewImage(link) {
       res.body.cancel();
       return null;
     }
-    // Try the <head> first; only if it has no image, read on for JSON-LD / shop markup in the body.
+    // Try the <head> first. If it has no image, scan the body chunk by chunk and stop at the first hit:
+    // shop pages (Amazon ~2.5 MB) are too big to parse in one go within the Worker CPU limit.
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     const base = res.url || link;
-    let html = "";
-    let headChecked = false;
-    while (html.length < 2500000) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value, { stream: true });
-      const seam = html.slice(-7) + chunk;
-      html += chunk;
-      if (!headChecked && /<\/head>/i.test(seam)) {
-        headChecked = true;
-        const fromHead = extractImage(html, base);
-        if (fromHead) {
-          reader.cancel().catch(() => {});
-          return fromHead;
+    let head = "";
+    let carry = ""; // unscanned tail of the previous chunk, so markers split across chunks are still found
+    let read = 0;
+    try {
+      while (read < 3500000) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        read += value.length;
+        const chunk = decoder.decode(value, { stream: true });
+        if (head !== null) {
+          const seam = head.slice(-7) + chunk;
+          head += chunk;
+          if (/<\/head>/i.test(seam) || head.length > 300000) {
+            const fromHead = extractImage(head, base);
+            if (fromHead) return fromHead;
+            carry = head.slice(-2000);
+            head = null;
+          }
+          continue;
         }
+        const buf = carry + chunk;
+        const found = amazonImage(buf) || jsonLdImage(buf);
+        const url = found && safeImageUrl(found, base);
+        if (url) return url;
+        // Keep an unfinished JSON-LD block whole (bounded), otherwise just a short tail.
+        const ld = buf.lastIndexOf("application/ld+json");
+        const start = ld === -1 || buf.indexOf("</script>", ld) !== -1 ? -1 : buf.lastIndexOf("<script", ld);
+        carry = start !== -1 && buf.length - start < 200000 ? buf.slice(start) : buf.slice(-2000);
       }
+      return head ? extractImage(head, base) : null;
+    } finally {
+      reader.cancel().catch(() => {});
     }
-    reader.cancel().catch(() => {});
-    return extractImage(html, base);
   } catch {
     return null;
   } finally {
