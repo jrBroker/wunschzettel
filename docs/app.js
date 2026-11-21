@@ -73,7 +73,8 @@
     return t.content.firstElementChild;
   }
   function render(...nodes) {
-    app.replaceChildren(...nodes);
+    // replaceChildren would turn null into the text "null"
+    app.replaceChildren(...nodes.flat().filter((n) => n != null && n !== false));
   }
 
   let toastTimer;
