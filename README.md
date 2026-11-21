@@ -77,5 +77,7 @@ per WhatsApp verschickt werden.
 - **Einladungscode:** Ein über die Verwaltung erneuerter Code steht in der Tabelle `settings` und hat Vorrang vor dem Secret `INVITE_CODE`.
 - **Datenbank-Änderungen:** Neue Spalten/Tabellen kommen als Datei in `worker/migrations/` und werden einmalig mit
   `npx wrangler d1 execute wunschliste --remote --file=migrations/<datei>.sql` angewendet (vorher `wrangler d1 export` als Sicherung).
+- **Browser-Cache:** Die Dateien in `docs/index.html` tragen eine Versionsnummer (`?v=…`). Ein Git-Hook setzt sie bei jedem
+  Commit mit Änderungen in `docs/` neu. Nach einem frischen Klonen einmal aktivieren: `git config core.hooksPath .githooks`
 - **Tests:** Brauchen ein lokales Admin-Konto (Standard `Iwan` / `testpass1`, änderbar über `ADMIN_NAME` / `ADMIN_PASSWORD`).
 - **Gelöschte Wünsche:** Löscht jemand einen Wunsch, den schon jemand schenken wollte, verschwindet auch die Markierung.

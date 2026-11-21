@@ -1,0 +1,8 @@
+#!/bin/sh
+# Stamps a fresh ?v= on the asset URLs in docs/index.html whenever website files are committed,
+# so browsers never combine a cached old script with a new page.
+if git diff --cached --name-only | grep -q '^docs/'; then
+  v=$(date +%Y%m%d%H%M%S)
+  sed -i -E "s/\?v=[0-9A-Za-z]+/?v=$v/g" docs/index.html
+  git add docs/index.html
+fi
