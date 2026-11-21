@@ -112,6 +112,14 @@ select.input option { background: var(--bg-2); color: var(--text); }
 .hero h1 { font-size: clamp(1.9rem, 5vw, 2.7rem); line-height: 1.15; }
 .hero h1 em { font-style: normal; color: var(--gold); }
 .hero p { color: var(--muted); margin: 8px 0 0; }
+.daily {
+  display: flex; align-items: flex-start; gap: 14px; margin: -8px 0 30px; padding: 18px 22px;
+  border-radius: var(--radius); background: var(--gold-soft); border: 1px solid rgba(233, 180, 76, 0.28);
+}
+.daily-star { flex: none; width: 22px; height: 22px; margin-top: 3px; fill: var(--gold); filter: drop-shadow(0 0 6px rgba(233, 180, 76, 0.6)); }
+.daily blockquote { margin: 0; font-family: var(--font-display); font-weight: 500; font-size: 1.15rem; line-height: 1.45; color: #f8e7c4; }
+.slot-hint { display: flex; align-items: center; gap: 6px; margin: 12px 0 0; font-size: 0.83rem; color: var(--gold); }
+.slot-hint::before { content: "€"; display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--gold-soft); font-size: 0.72rem; font-weight: 700; }
 .countdown { display: flex; align-items: center; gap: 14px; padding: 14px 20px; border-radius: var(--radius); background: var(--red-soft); border: 1px solid rgba(210, 80, 63, 0.35); }
 .countdown strong { font-family: var(--font-display); font-size: 2.2rem; line-height: 1; color: #ffb4a6; }
 .countdown span { font-size: 0.9rem; color: var(--muted); line-height: 1.3; }

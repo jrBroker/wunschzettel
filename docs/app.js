@@ -247,6 +247,10 @@
           days === 0
             ? h("span", null, h("strong", null, "Heute"), " ist Heiligabend!")
             : [h("strong", null, String(days)), h("span", null, days === 1 ? "Tag bis" : "Tage bis", h("br"), "Heiligabend")])),
+      window.dailyTextFor
+        ? h("figure", { class: "daily" }, icons.star("daily-star"),
+          h("blockquote", null, window.dailyTextFor(today)))
+        : null,
       h("h2", { class: "section-title" }, "Familie"),
       h("div", { class: "family-grid" },
         sorted.map((u) => h("a", { class: "card person" + (u.id === me.id ? " me" : ""), href: `#/liste/${u.id}` },
@@ -343,6 +347,7 @@
             items.length
               ? h("ul", { class: "wishes" }, items.map((w) => state.editing === w.id ? editItem(w) : ownItem(w)))
               : h("p", { class: "empty" }, "Noch nichts eingetragen."),
+            s.n <= 4 ? h("p", { class: "slot-hint" }, "Advents-Geschenke bitte bis ca. 50 €") : null,
             addForm(s.n));
         })));
       window.scrollTo(0, y);
