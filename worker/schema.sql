@@ -18,12 +18,27 @@ CREATE TABLE IF NOT EXISTS wishes (
   slot INTEGER NOT NULL CHECK (slot BETWEEN 1 AND 5),
   title TEXT NOT NULL,
   link TEXT,
+  price_cents INTEGER,
+  favorite INTEGER NOT NULL DEFAULT 0,
+  image_url TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_wishes_user ON wishes(user_id);
 
 CREATE TABLE IF NOT EXISTS claims (
-  wish_id INTEGER PRIMARY KEY REFERENCES wishes(id) ON DELETE CASCADE,
+  wish_id INTEGER NOT NULL REFERENCES wishes(id) ON DELETE CASCADE,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  bought INTEGER NOT NULL DEFAULT 0,
+  wrapped INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (wish_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS notes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  wish_id INTEGER NOT NULL REFERENCES wishes(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  text TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE INDEX IF NOT EXISTS idx_notes_wish ON notes(wish_id);

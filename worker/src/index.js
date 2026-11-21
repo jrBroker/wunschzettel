@@ -80,11 +80,18 @@ async function route(request, env) {
     if (m === "PUT") return updateWish(request, env, me, id);
     if (m === "DELETE") return deleteWish(env, me, id);
   }
+  if (m === "POST" && (match = path.match(/^\/api\/wishes\/(\d+)\/preview$/)))
+    return refreshPreview(env, me, Number(match[1]));
   if ((match = path.match(/^\/api\/wishes\/(\d+)\/claim$/))) {
     const id = Number(match[1]);
     if (m === "POST") return claimWish(env, me, id);
+    if (m === "PUT") return updateClaim(request, env, me, id);
     if (m === "DELETE") return unclaimWish(env, me, id);
   }
+  if (m === "GET" && path === "/api/claims") return myClaims(env, me);
+  if (m === "POST" && (match = path.match(/^\/api\/wishes\/(\d+)\/notes$/)))
+    return createNote(request, env, me, Number(match[1]));
+  if (m === "DELETE" && (match = path.match(/^\/api\/notes\/(\d+)$/))) return deleteNote(env, me, Number(match[1]));
   throw new HttpError(404, "Nicht gefunden");
 }
 
@@ -207,31 +214,68 @@ async function listUsers(env) {
   return json({ users: results });
 }
 
+const WISH_COLUMNS = "w.id, w.slot, w.title, w.link, w.price_cents, w.favorite, w.image_url";
+const WISH_ORDER = "ORDER BY w.slot, w.favorite DESC, w.id";
+
+function placeholders(n) {
+  return Array(n).fill("?").join(",");
+}
+
 async function listWishes(env, me, ownerId) {
   const owner = await env.DB.prepare("SELECT id, name FROM users WHERE id = ?").bind(ownerId).first();
   if (!owner) throw new HttpError(404, "Diese Person gibt es nicht");
 
-  // The owner must never learn who claimed what, so claims are not even queried for them.
-  if (owner.id === me.id) {
-    const { results } = await env.DB.prepare(
-      "SELECT id, slot, title, link FROM wishes WHERE user_id = ? ORDER BY slot, id"
-    )
-      .bind(ownerId)
-      .all();
-    return json({ owner, own: true, wishes: results });
-  }
-
-  const { results } = await env.DB.prepare(
-    `SELECT w.id, w.slot, w.title, w.link, c.user_id AS claimed_by_id, cu.name AS claimed_by
-     FROM wishes w
-     LEFT JOIN claims c ON c.wish_id = w.id
-     LEFT JOIN users cu ON cu.id = c.user_id
-     WHERE w.user_id = ? ORDER BY w.slot, w.id`
-  )
+  const { results: wishes } = await env.DB.prepare(`SELECT ${WISH_COLUMNS} FROM wishes w WHERE w.user_id = ? ${WISH_ORDER}`)
     .bind(ownerId)
     .all();
-  const wishes = results.map(({ claimed_by_id, ...w }) => ({ ...w, claimed_by_me: claimed_by_id === me.id }));
-  return json({ owner, own: false, wishes });
+
+  // The owner must never learn who gifts what or read notes, so neither is even queried for them.
+  if (owner.id === me.id) return json({ owner, own: true, wishes });
+
+  const ids = wishes.map((w) => w.id);
+  let claims = [];
+  let notes = [];
+  if (ids.length) {
+    const [c, n] = await env.DB.batch([
+      env.DB.prepare(
+        `SELECT c.wish_id, u.id, u.name FROM claims c JOIN users u ON u.id = c.user_id
+         WHERE c.wish_id IN (${placeholders(ids.length)}) ORDER BY c.created_at, u.id`
+      ).bind(...ids),
+      env.DB.prepare(
+        `SELECT n.id, n.wish_id, n.text, n.created_at, n.user_id, u.name AS author FROM notes n JOIN users u ON u.id = n.user_id
+         WHERE n.wish_id IN (${placeholders(ids.length)}) ORDER BY n.id`
+      ).bind(...ids),
+    ]);
+    claims = c.results;
+    notes = n.results;
+  }
+  return json({
+    owner,
+    own: false,
+    wishes: wishes.map((w) => {
+      const givers = claims.filter((c) => c.wish_id === w.id).map(({ id, name }) => ({ id, name }));
+      return {
+        ...w,
+        givers,
+        claimed_by_me: givers.some((g) => g.id === me.id),
+        notes: notes
+          .filter((n) => n.wish_id === w.id)
+          .map((n) => ({ id: n.id, text: n.text, author: n.author, created_at: n.created_at, mine: n.user_id === me.id })),
+      };
+    }),
+  });
+}
+
+function parsePrice(raw) {
+  if (raw == null || raw === "") return null;
+  const s = String(raw).replace(/[€\s]/g, "").replace(/^ca\.?/i, "");
+  if (!s) return null;
+  // Accept "29,99", "29.99", "1.299,50", "1299"
+  const normalized = s.includes(",") ? s.replace(/\./g, "").replace(",", ".") : s;
+  if (!/^\d+(\.\d{1,2})?$/.test(normalized)) throw new HttpError(400, "Der Preis sieht nicht gültig aus");
+  const cents = Math.round(parseFloat(normalized) * 100);
+  if (cents > 100000000) throw new HttpError(400, "Der Preis ist zu hoch");
+  return cents;
 }
 
 function validateWish(input) {
@@ -254,33 +298,199 @@ function validateWish(input) {
     if (link.length > MAX_LINK) throw new HttpError(400, "Der Link ist zu lang");
     link = parsed.href;
   }
-  return { slot, title, link: link || null };
+  return { slot, title, link: link || null, price_cents: parsePrice(input.price), favorite: input.favorite ? 1 : 0 };
 }
 
+// ---------- link preview image ----------
+
+function decodeEntities(s) {
+  return s
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#0*39;|&apos;/g, "'")
+    .replace(/&#x2F;/gi, "/")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
+function tagAttrs(tag) {
+  const attrs = {};
+  for (const m of tag.matchAll(/([a-zA-Z_:-]+)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/g)) {
+    attrs[m[1].toLowerCase()] = m[3] ?? m[4] ?? m[5] ?? "";
+  }
+  return attrs;
+}
+
+function safeImageUrl(candidate, base) {
+  try {
+    const url = new URL(decodeEntities(candidate.trim()), base);
+    if (url.protocol === "http:") url.protocol = "https:"; // the site is https; http images would be blocked
+    if (url.protocol !== "https:" || url.href.length > MAX_LINK) return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+export function extractImage(html, baseUrl) {
+  const found = {};
+  for (const [tag] of html.matchAll(/<meta\b[^>]*>/gi)) {
+    const a = tagAttrs(tag);
+    const key = (a.property || a.name || a.itemprop || "").toLowerCase();
+    if (a.content && !found[key]) found[key] = a.content;
+  }
+  for (const [tag] of html.matchAll(/<link\b[^>]*>/gi)) {
+    const a = tagAttrs(tag);
+    if ((a.rel || "").toLowerCase() === "image_src" && a.href && !found.image_src) found.image_src = a.href;
+  }
+  for (const key of ["og:image:secure_url", "og:image", "og:image:url", "twitter:image", "twitter:image:src", "image", "image_src"]) {
+    if (found[key]) {
+      const url = safeImageUrl(found[key], baseUrl);
+      if (url) return url;
+    }
+  }
+  for (const candidate of [jsonLdImage(html), amazonImage(html)]) {
+    const url = candidate && safeImageUrl(candidate, baseUrl);
+    if (url) return url;
+  }
+  return null;
+}
+
+// Shops often describe products as JSON-LD (schema.org) instead of og:image.
+function jsonLdImage(html) {
+  const pick = (img) => {
+    if (typeof img === "string") return img;
+    if (Array.isArray(img)) return pick(img[0]);
+    if (img && typeof img === "object") return img.url || img.contentUrl || null;
+    return null;
+  };
+  const find = (node, depth = 0) => {
+    if (!node || typeof node !== "object" || depth > 6) return null;
+    if (Array.isArray(node)) {
+      for (const n of node) {
+        const r = find(n, depth + 1);
+        if (r) return r;
+      }
+      return null;
+    }
+    if (node.image) {
+      const r = pick(node.image);
+      if (r) return r;
+    }
+    for (const v of Object.values(node)) {
+      const r = find(v, depth + 1);
+      if (r) return r;
+    }
+    return null;
+  };
+  for (const [, raw] of html.matchAll(/<script[^>]+application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi)) {
+    try {
+      const r = find(JSON.parse(raw));
+      if (r) return r;
+    } catch {}
+  }
+  return null;
+}
+
+function amazonImage(html) {
+  const m =
+    html.match(/data-old-hires="(https:[^"]+)"/) ||
+    html.match(/"hiRes":"(https:[^"]+)"/) ||
+    html.match(/id="landingImage"[^>]*?\ssrc="(https:[^"]+)"/) ||
+    html.match(/id="imgBlkFront"[^>]*?\ssrc="(https:[^"]+)"/);
+  return m ? m[1] : null;
+}
+
+async function fetchPreviewImage(link) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 5000);
+  try {
+    const res = await fetch(link, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; WunschzettelLinkPreview/1.0)",
+        Accept: "text/html,application/xhtml+xml,image/*;q=0.8",
+        "Accept-Language": "de-DE,de;q=0.9",
+      },
+      redirect: "follow",
+      signal: ctrl.signal,
+    });
+    if (!res.ok || !res.body) return null;
+    const type = res.headers.get("content-type") || "";
+    if (type.startsWith("image/")) {
+      res.body.cancel();
+      return safeImageUrl(link, link);
+    }
+    if (!type.includes("html")) {
+      res.body.cancel();
+      return null;
+    }
+    // Try the <head> first; only if it has no image, read on for JSON-LD / shop markup in the body.
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    const base = res.url || link;
+    let html = "";
+    let headChecked = false;
+    while (html.length < 2500000) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      const seam = html.slice(-7) + chunk;
+      html += chunk;
+      if (!headChecked && /<\/head>/i.test(seam)) {
+        headChecked = true;
+        const fromHead = extractImage(html, base);
+        if (fromHead) {
+          reader.cancel().catch(() => {});
+          return fromHead;
+        }
+      }
+    }
+    reader.cancel().catch(() => {});
+    return extractImage(html, base);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// ---------- wishes ----------
+
 async function ownWish(env, me, id) {
-  const wish = await env.DB.prepare("SELECT id, user_id FROM wishes WHERE id = ?").bind(id).first();
+  const wish = await env.DB.prepare("SELECT id, user_id, link, image_url FROM wishes WHERE id = ?").bind(id).first();
   if (!wish) throw new HttpError(404, "Wunsch nicht gefunden");
   if (wish.user_id !== me.id) throw new HttpError(403, "Das ist nicht dein Wunsch");
   return wish;
 }
 
+const RETURN_WISH = "RETURNING id, slot, title, link, price_cents, favorite, image_url";
+
+// The image is fetched in a separate request so a slow or blocked shop can never prevent saving a wish.
+async function refreshPreview(env, me, id) {
+  const wish = await ownWish(env, me, id);
+  const image = wish.link ? await fetchPreviewImage(wish.link) : null;
+  const row = await env.DB.prepare(`UPDATE wishes SET image_url = ? WHERE id = ? ${RETURN_WISH}`).bind(image, id).first();
+  return json({ wish: row });
+}
+
 async function createWish(request, env, me) {
   const w = validateWish(await body(request));
   const row = await env.DB.prepare(
-    "INSERT INTO wishes (user_id, slot, title, link) VALUES (?, ?, ?, ?) RETURNING id, slot, title, link"
+    `INSERT INTO wishes (user_id, slot, title, link, price_cents, favorite) VALUES (?, ?, ?, ?, ?, ?) ${RETURN_WISH}`
   )
-    .bind(me.id, w.slot, w.title, w.link)
+    .bind(me.id, w.slot, w.title, w.link, w.price_cents, w.favorite)
     .first();
   return json({ wish: row }, 201);
 }
 
 async function updateWish(request, env, me, id) {
-  await ownWish(env, me, id);
+  const old = await ownWish(env, me, id);
   const w = validateWish(await body(request));
+  const image = w.link && w.link === old.link ? old.image_url : null;
   const row = await env.DB.prepare(
-    "UPDATE wishes SET slot = ?, title = ?, link = ? WHERE id = ? RETURNING id, slot, title, link"
+    `UPDATE wishes SET slot = ?, title = ?, link = ?, price_cents = ?, favorite = ?, image_url = ? WHERE id = ? ${RETURN_WISH}`
   )
-    .bind(w.slot, w.title, w.link, id)
+    .bind(w.slot, w.title, w.link, w.price_cents, w.favorite, image, id)
     .first();
   return json({ wish: row });
 }
@@ -289,26 +499,93 @@ async function deleteWish(env, me, id) {
   await ownWish(env, me, id);
   await env.DB.batch([
     env.DB.prepare("DELETE FROM claims WHERE wish_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM notes WHERE wish_id = ?").bind(id),
     env.DB.prepare("DELETE FROM wishes WHERE id = ?").bind(id),
   ]);
   return json({ ok: true });
 }
 
-async function claimWish(env, me, id) {
+// ---------- claims (who gifts what) ----------
+
+async function foreignWish(env, me, id, ownMessage) {
   const wish = await env.DB.prepare("SELECT id, user_id FROM wishes WHERE id = ?").bind(id).first();
   if (!wish) throw new HttpError(404, "Wunsch nicht gefunden");
-  if (wish.user_id === me.id) throw new HttpError(403, "Eigene Wünsche kannst du nicht markieren");
-  const res = await env.DB.prepare("INSERT OR IGNORE INTO claims (wish_id, user_id) VALUES (?, ?)")
-    .bind(id, me.id)
-    .run();
-  if (res.meta.changes === 0) {
-    const c = await env.DB.prepare("SELECT user_id FROM claims WHERE wish_id = ?").bind(id).first();
-    if (c && c.user_id !== me.id) throw new HttpError(409, "Das schenkt schon jemand anderes");
-  }
+  if (wish.user_id === me.id) throw new HttpError(403, ownMessage);
+  return wish;
+}
+
+async function claimWish(env, me, id) {
+  await foreignWish(env, me, id, "Eigene Wünsche kannst du nicht markieren");
+  await env.DB.prepare("INSERT OR IGNORE INTO claims (wish_id, user_id) VALUES (?, ?)").bind(id, me.id).run();
   return json({ ok: true });
+}
+
+async function updateClaim(request, env, me, id) {
+  const input = await body(request);
+  const claim = await env.DB.prepare("SELECT bought, wrapped FROM claims WHERE wish_id = ? AND user_id = ?")
+    .bind(id, me.id)
+    .first();
+  if (!claim) throw new HttpError(404, "Du schenkst diesen Wunsch nicht");
+  const bought = "bought" in input ? (input.bought ? 1 : 0) : claim.bought;
+  const wrapped = "wrapped" in input ? (input.wrapped ? 1 : 0) : claim.wrapped;
+  await env.DB.prepare("UPDATE claims SET bought = ?, wrapped = ? WHERE wish_id = ? AND user_id = ?")
+    .bind(bought, wrapped, id, me.id)
+    .run();
+  return json({ ok: true, bought, wrapped });
 }
 
 async function unclaimWish(env, me, id) {
   await env.DB.prepare("DELETE FROM claims WHERE wish_id = ? AND user_id = ?").bind(id, me.id).run();
+  return json({ ok: true });
+}
+
+async function myClaims(env, me) {
+  const { results: rows } = await env.DB.prepare(
+    `SELECT ${WISH_COLUMNS}, c.bought, c.wrapped, o.id AS owner_id, o.name AS owner_name
+     FROM claims c JOIN wishes w ON w.id = c.wish_id JOIN users o ON o.id = w.user_id
+     WHERE c.user_id = ? ORDER BY o.name COLLATE NOCASE, w.slot, w.id`
+  )
+    .bind(me.id)
+    .all();
+  let others = [];
+  if (rows.length) {
+    const ids = rows.map((r) => r.id);
+    ({ results: others } = await env.DB.prepare(
+      `SELECT c.wish_id, u.name FROM claims c JOIN users u ON u.id = c.user_id
+       WHERE c.wish_id IN (${placeholders(ids.length)}) AND c.user_id != ? ORDER BY c.created_at`
+    )
+      .bind(...ids, me.id)
+      .all());
+  }
+  return json({
+    claims: rows.map((r) => ({
+      ...r,
+      co_givers: others.filter((o) => o.wish_id === r.id).map((o) => o.name),
+    })),
+  });
+}
+
+// ---------- secret notes ----------
+
+const MAX_NOTE = 500;
+
+async function createNote(request, env, me, id) {
+  await foreignWish(env, me, id, "Zu eigenen Wünschen kannst du keine Notizen schreiben");
+  const text = String((await body(request)).text || "").trim();
+  if (!text) throw new HttpError(400, "Die Notiz ist leer");
+  if (text.length > MAX_NOTE) throw new HttpError(400, `Die Notiz darf höchstens ${MAX_NOTE} Zeichen haben`);
+  const note = await env.DB.prepare(
+    "INSERT INTO notes (wish_id, user_id, text) VALUES (?, ?, ?) RETURNING id, text, created_at"
+  )
+    .bind(id, me.id, text)
+    .first();
+  return json({ note: { ...note, author: me.name, mine: true } }, 201);
+}
+
+async function deleteNote(env, me, id) {
+  const note = await env.DB.prepare("SELECT user_id FROM notes WHERE id = ?").bind(id).first();
+  if (!note) throw new HttpError(404, "Notiz nicht gefunden");
+  if (note.user_id !== me.id) throw new HttpError(403, "Du kannst nur eigene Notizen löschen");
+  await env.DB.prepare("DELETE FROM notes WHERE id = ?").bind(id).run();
   return json({ ok: true });
 }

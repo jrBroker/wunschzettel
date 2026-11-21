@@ -111,6 +111,9 @@
     edit: () => svg(`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>`),
     trash: () => svg(`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>`),
     external: () => svg(`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7"/><path d="M8 7h9v9"/></svg>`),
+    heart: (filled) => svg(`<svg viewBox="0 0 24 24" class="heart ${filled ? "on" : "off"}" fill="${filled ? "currentColor" : "none"}" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7.5-4.6-9.6-9.4C.9 8 3 4 6.8 4c2.2 0 3.6 1.2 5.2 3 1.6-1.8 3-3 5.2-3C21 4 23.1 8 21.6 11.6 19.5 16.4 12 21 12 21z"/></svg>`),
+    note: () => svg(`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16v12H8l-4 4z"/><path d="M8 9h8M8 12h5"/></svg>`),
+    x: () => svg(`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>`),
     lock: () => svg(`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 9V7A5 5 0 0 0 7 7v2a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2zm-8-2a3 3 0 0 1 6 0v2H9z"/></svg>`),
   };
 
@@ -277,17 +280,63 @@
     return h("a", { class: "wish-link", href, target: "_blank", rel: "noopener noreferrer" }, prettyHost(href), icons.external());
   }
 
-  // --- own list (editable, no claim info) ---
+  function formatPrice(cents) {
+    const digits = cents % 100 ? 2 : 0;
+    return (cents / 100).toLocaleString("de-DE", { style: "currency", currency: "EUR", minimumFractionDigits: digits, maximumFractionDigits: digits });
+  }
+  function priceInputValue(cents) {
+    return cents == null ? "" : (cents / 100).toLocaleString("de-DE", { maximumFractionDigits: 2 });
+  }
+
+  function thumb(w) {
+    const href = w.link ? safeUrl(w.link) : null;
+    if (!w.image_url || !safeUrl(w.image_url)) return null;
+    const img = h("img", { class: "thumb", src: w.image_url, alt: "", loading: "lazy", referrerpolicy: "no-referrer" });
+    img.addEventListener("error", () => (href ? img.parentElement : img).remove());
+    return href ? h("a", { class: "thumb-link", href, target: "_blank", rel: "noopener noreferrer", tabindex: "-1", "aria-hidden": "true" }, img) : img;
+  }
+
+  function wishMeta(w) {
+    const parts = [];
+    if (w.price_cents != null) parts.push(h("span", { class: "price" }, "ca. " + formatPrice(w.price_cents)));
+    if (w.link) parts.push(linkEl(w.link));
+    return parts.length ? h("div", { class: "wish-meta" }, parts) : null;
+  }
+
+  function wishTitle(w) {
+    return h("div", { class: "wish-title" },
+      w.favorite ? h("span", { class: "fav-mark", title: "Herzenswunsch" }, icons.heart(true), h("span", { class: "sr-only" }, "Herzenswunsch: ")) : null,
+      w.title);
+  }
+
+  function joinNames(names) {
+    return names.length < 2 ? names.join("") : names.slice(0, -1).join(", ") + " & " + names[names.length - 1];
+  }
+
+  function favToggle(initial) {
+    const btn = h("button", { class: "fav-toggle", type: "button", title: "Herzenswunsch", "aria-label": "Herzenswunsch", "aria-pressed": String(!!initial) },
+      icons.heart(false), icons.heart(true));
+    btn.addEventListener("click", () => btn.setAttribute("aria-pressed", String(btn.getAttribute("aria-pressed") !== "true")));
+    btn.isOn = () => btn.getAttribute("aria-pressed") === "true";
+    return btn;
+  }
+
+  // --- own list (editable, no gift info) ---
   function ownList(data) {
     const state = { wishes: data.wishes, editing: null };
 
+    function sortWishes() {
+      state.wishes.sort((a, b) => a.slot - b.slot || b.favorite - a.favorite || a.id - b.id);
+    }
+
     function draw(focusSlot) {
       const y = window.scrollY;
+      sortWishes();
       render(
         ...listHeader(data.owner, true),
         h("div", { class: "notice" }, icons.lock(),
-          h("div", null, "Trag für jeden Termin so viele Wünsche ein, wie du magst. ",
-            h("strong", null, "Wer dir was schenkt, bleibt für dich geheim."))),
+          h("div", null, "Trag für jeden Termin so viele Wünsche ein, wie du magst. Mit dem Herz markierst du Herzenswünsche. ",
+            h("strong", null, "Wer dir was schenkt und was die anderen notieren, bleibt für dich geheim."))),
         h("div", { class: "timeline" }, slots().map((s) => {
           const items = state.wishes.filter((w) => w.slot === s.n);
           return slotCard(s,
@@ -300,9 +349,23 @@
       if (focusSlot) app.querySelector(`[data-slot="${focusSlot}"] .add-form input[name=title]`)?.focus();
     }
 
+    async function loadPreview(w) {
+      if (!w.link || w.image_url) return;
+      try {
+        const { wish } = await api("POST", `/api/wishes/${w.id}/preview`);
+        const current = state.wishes.find((x) => x.id === w.id);
+        if (!current || !wish.image_url || current.link !== wish.link) return;
+        current.image_url = wish.image_url;
+        // Insert just the image; a full redraw would wipe whatever the user is typing.
+        const li = app.querySelector(`li[data-wish="${w.id}"]`);
+        if (li && !li.querySelector(".thumb")) li.prepend(thumb(current));
+      } catch {}
+    }
+
     function ownItem(w) {
-      return h("li", { class: "wish" },
-        h("div", { class: "wish-body" }, h("div", { class: "wish-title" }, w.title), w.link ? linkEl(w.link) : null),
+      return h("li", { class: "wish" + (w.favorite ? " fav" : ""), "data-wish": w.id },
+        thumb(w),
+        h("div", { class: "wish-body" }, wishTitle(w), wishMeta(w)),
         h("div", { class: "wish-actions" },
           h("button", { class: "btn-icon btn", type: "button", title: "Bearbeiten", "aria-label": `${w.title} bearbeiten`,
             onclick: () => { state.editing = w.id; draw(); app.querySelector(".edit-form input")?.focus(); } }, icons.edit()),
@@ -321,58 +384,78 @@
     function editItem(w) {
       const title = h("input", { class: "input", name: "title", value: w.title, maxlength: "200", required: true, "aria-label": "Wunsch" });
       const link = h("input", { class: "input", name: "link", value: w.link || "", placeholder: "Link (optional)", "aria-label": "Link" });
+      const price = h("input", { class: "input", name: "price", value: priceInputValue(w.price_cents), placeholder: "Preis €", inputmode: "decimal", "aria-label": "Ungefährer Preis in Euro" });
+      const fav = favToggle(w.favorite);
       const slotSel = h("select", { class: "input", "aria-label": "Termin" },
         slots().map((s) => h("option", { value: s.n, selected: s.n === w.slot }, s.label)));
+      const save = h("button", { class: "btn btn-gold btn-sm", type: "submit" }, "Speichern");
       return h("li", { class: "wish" },
         h("form", { class: "edit-form", onsubmit: async (e) => {
           e.preventDefault();
+          save.disabled = true;
           try {
-            const { wish } = await api("PUT", `/api/wishes/${w.id}`, { slot: Number(slotSel.value), title: title.value, link: link.value });
+            const { wish } = await api("PUT", `/api/wishes/${w.id}`,
+              { slot: Number(slotSel.value), title: title.value, link: link.value, price: price.value, favorite: fav.isOn() });
             state.wishes = state.wishes.map((x) => (x.id === w.id ? wish : x));
             state.editing = null;
             draw();
             toast("Gespeichert");
-          } catch (ex) { toast(ex.message, true); }
+            loadPreview(wish);
+          } catch (ex) {
+            toast(ex.message, true);
+            save.disabled = false;
+          }
         } },
-          title, link, slotSel,
+          title, link,
+          h("div", { class: "edit-row" }, price, fav, slotSel),
           h("div", { class: "row" },
             h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { state.editing = null; draw(); } }, "Abbrechen"),
-            h("button", { class: "btn btn-gold btn-sm", type: "submit" }, "Speichern"))));
+            save)));
     }
 
     function addForm(slot) {
-      const title = h("input", { class: "input", name: "title", placeholder: "Was wünschst du dir?", maxlength: "200", required: true, "aria-label": "Neuer Wunsch" });
-      const link = h("input", { class: "input", name: "link", placeholder: "Link (optional)", "aria-label": "Link zum Wunsch" });
-      const btn = h("button", { class: "btn btn-gold", type: "submit" }, "Hinzufügen");
+      const title = h("input", { class: "input f-title", name: "title", placeholder: "Was wünschst du dir?", maxlength: "200", required: true, "aria-label": "Neuer Wunsch" });
+      const link = h("input", { class: "input f-link", name: "link", placeholder: "Link (optional)", "aria-label": "Link zum Wunsch" });
+      const price = h("input", { class: "input f-price", name: "price", placeholder: "Preis €", inputmode: "decimal", "aria-label": "Ungefährer Preis in Euro (optional)" });
+      const fav = favToggle(false);
+      fav.classList.add("f-fav");
+      const btn = h("button", { class: "btn btn-gold f-add", type: "submit" }, "Hinzufügen");
       return h("form", { class: "add-form", onsubmit: async (e) => {
         e.preventDefault();
         btn.disabled = true;
         try {
-          const { wish } = await api("POST", "/api/wishes", { slot, title: title.value, link: link.value });
+          const { wish } = await api("POST", "/api/wishes", { slot, title: title.value, link: link.value, price: price.value, favorite: fav.isOn() });
           state.wishes.push(wish);
           draw(slot);
+          loadPreview(wish);
         } catch (ex) {
           toast(ex.message, true);
           btn.disabled = false;
         }
-      } }, title, link, btn);
+      } }, title, link, price, fav, btn);
     }
 
     draw();
   }
 
-  // --- someone else's list (claimable) ---
+  // --- someone else's list (gifting + secret notes) ---
   function otherList(data) {
-    const state = { wishes: data.wishes };
+    const state = { wishes: data.wishes, openNotes: new Set() };
+
+    async function reload() {
+      const fresh = await api("GET", `/api/users/${data.owner.id}/wishes`);
+      state.wishes = fresh.wishes;
+      draw();
+    }
 
     function draw() {
       const y = window.scrollY;
-      const open = state.wishes.filter((w) => !w.claimed_by).length;
+      const open = state.wishes.filter((w) => !w.givers.length).length;
       render(
         ...listHeader(data.owner, false),
         h("div", { class: "notice" }, icons.lock(),
-          h("div", null, "Markiere, was du schenkst, damit nichts doppelt kommt. ",
-            h("strong", null, `${data.owner.name} sieht das nicht.`),
+          h("div", null, "Markiere, was du schenkst, damit nichts doppelt kommt. Für teure Wünsche könnt ihr zusammenlegen. ",
+            h("strong", null, `${data.owner.name} sieht weder Markierungen noch Notizen.`),
             state.wishes.length ? ` Noch offen: ${open} von ${state.wishes.length}.` : "")),
         h("div", { class: "timeline" }, slots().map((s) => {
           const items = state.wishes.filter((w) => w.slot === s.n);
@@ -384,35 +467,150 @@
     }
 
     function otherItem(w) {
-      const cls = "wish" + (w.claimed_by_me ? " mine-claim" : w.claimed_by ? " claimed" : "");
-      let status = null, action = null;
+      const cls = "wish" + (w.claimed_by_me ? " mine-claim" : w.givers.length ? " claimed" : "") + (w.favorite ? " fav" : "");
+      let status = null, action;
+      if (w.givers.length) {
+        const names = w.givers.filter((g) => g.id !== me.id).map((g) => g.name);
+        if (w.claimed_by_me) names.unshift("Du");
+        const solo = names.length === 1;
+        status = solo
+          ? (names[0] === "Du" ? "Du schenkst das" : `${names[0]} schenkt das`)
+          : `${joinNames(names)} schenken das zusammen`;
+      }
       if (w.claimed_by_me) {
-        status = "Du schenkst das";
-        action = h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => toggle(w, false) }, "Rückgängig");
-      } else if (w.claimed_by) {
-        status = `${w.claimed_by} schenkt das`;
+        action = h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => toggle(w, false) },
+          w.givers.length > 1 ? "Aussteigen" : "Rückgängig");
+      } else if (w.givers.length) {
+        action = h("button", { class: "btn btn-ghost btn-sm", type: "button", title: "Zusammen mit den anderen schenken", onclick: () => toggle(w, true) }, "Mitschenken");
       } else {
         action = h("button", { class: "btn btn-primary btn-sm", type: "button", onclick: () => toggle(w, true) }, "Ich schenke das");
       }
       return h("li", { class: cls },
+        thumb(w),
         h("div", { class: "wish-body" },
-          h("div", { class: "wish-title" }, w.title),
-          w.link ? linkEl(w.link) : null,
+          wishTitle(w),
+          wishMeta(w),
           status ? h("div", { class: "wish-status" }, "✓ ", status) : null),
-        action ? h("div", { class: "wish-actions wide" }, action) : null);
+        h("div", { class: "wish-actions wide" }, action),
+        notesBlock(w));
+    }
+
+    function notesBlock(w) {
+      const input = h("input", { class: "input", placeholder: "z. B. Größe M, hab ich bestellt …", maxlength: "500", required: true, "aria-label": "Geheime Notiz" });
+      const details = h("details", { class: "notes", open: state.openNotes.has(w.id) },
+        h("summary", null, icons.note(), w.notes.length ? `Geheime Notizen (${w.notes.length})` : "Geheime Notiz schreiben"),
+        w.notes.length ? h("ul", { class: "note-list" }, w.notes.map((n) => h("li", { class: "note" },
+          h("div", null, h("strong", null, n.mine ? "Du" : n.author), ": ", n.text),
+          n.mine ? h("button", { class: "btn-icon btn", type: "button", title: "Notiz löschen", "aria-label": "Notiz löschen",
+            onclick: async () => {
+              try { await api("DELETE", `/api/notes/${n.id}`); await reload(); } catch (e) { toast(e.message, true); }
+            } }, icons.x()) : null))) : null,
+        h("form", { class: "note-form", onsubmit: async (e) => {
+          e.preventDefault();
+          try {
+            await api("POST", `/api/wishes/${w.id}/notes`, { text: input.value });
+            state.openNotes.add(w.id);
+            await reload();
+            app.querySelector(`[data-notes="${w.id}"] .note-form input`)?.focus();
+          } catch (ex) { toast(ex.message, true); }
+        } }, input, h("button", { class: "btn btn-ghost btn-sm", type: "submit" }, "Notieren")));
+      details.dataset.notes = w.id;
+      details.addEventListener("toggle", () => {
+        if (details.open) state.openNotes.add(w.id); else state.openNotes.delete(w.id);
+      });
+      return details;
     }
 
     async function toggle(w, claim) {
       try {
         await api(claim ? "POST" : "DELETE", `/api/wishes/${w.id}/claim`);
-        w.claimed_by = claim ? me.name : null;
-        w.claimed_by_me = claim;
-        draw();
+        await reload();
         toast(claim ? `Notiert: Du schenkst „${w.title}“` : "Markierung entfernt");
       } catch (e) {
         toast(e.message, true);
-        if (e.status === 409 || e.status === 404) listView(data.owner.id).catch(showError);
+        if (e.status === 404) reload().catch(showError);
       }
+    }
+
+    draw();
+  }
+
+  // --- my shopping list ---
+  async function shoppingView() {
+    showLoading();
+    const { claims } = await api("GET", "/api/claims");
+    const slotLabels = Object.fromEntries(slots().map((s) => [s.n, s.label]));
+
+    function draw() {
+      const y = window.scrollY;
+      const bought = claims.filter((c) => c.bought).length;
+      const wrapped = claims.filter((c) => c.wrapped).length;
+      const share = claims.reduce((sum, c) => sum + (c.price_cents ?? 0) / (1 + c.co_givers.length), 0);
+      const hasPrices = claims.some((c) => c.price_cents != null);
+
+      const groups = [];
+      for (const c of claims) {
+        let g = groups.find((x) => x.id === c.owner_id);
+        if (!g) groups.push((g = { id: c.owner_id, name: c.owner_name, items: [] }));
+        g.items.push(c);
+      }
+
+      render(
+        h("a", { class: "back", href: "#/" }, "← Zur Familie"),
+        h("div", { class: "list-head" }, h("h1", null, "Meine Einkäufe")),
+        claims.length
+          ? h("div", { class: "card stats" },
+            stat(String(claims.length), claims.length === 1 ? "Geschenk" : "Geschenke"),
+            stat(`${bought}/${claims.length}`, "gekauft"),
+            stat(`${wrapped}/${claims.length}`, "eingepackt"),
+            hasPrices ? stat(formatPrice(Math.round(share)), "dein Anteil ca.") : null)
+          : h("div", { class: "card empty-state" },
+            h("p", null, "Du hast noch nichts markiert."),
+            h("p", { class: "muted" }, "Öffne die Wunschzettel der Familie und klick auf „Ich schenke das“."),
+            h("a", { class: "btn btn-gold", href: "#/" }, "Zur Familie")),
+        h("div", { class: "timeline" }, groups.map((g) => h("section", { class: "card slot" },
+          h("a", { class: "person-head", href: `#/liste/${g.id}` }, avatar(g.name), h("h2", { class: "slot-title" }, `Für ${g.name}`)),
+          h("ul", { class: "wishes" }, g.items.map(shopItem))))));
+      window.scrollTo(0, y);
+    }
+
+    function stat(value, label) {
+      return h("div", { class: "stat" }, h("strong", null, value), h("span", null, label));
+    }
+
+    function shopItem(c) {
+      const done = c.bought && c.wrapped;
+      return h("li", { class: "wish shop" + (done ? " done" : "") },
+        thumb(c),
+        h("div", { class: "wish-body" },
+          wishTitle(c),
+          h("div", { class: "wish-meta" },
+            h("span", null, slotLabels[c.slot]),
+            c.price_cents != null ? h("span", { class: "price" }, "ca. " + formatPrice(c.price_cents)) : null,
+            c.link ? linkEl(c.link) : null),
+          c.co_givers.length ? h("div", { class: "wish-status" }, "Zusammen mit " + joinNames(c.co_givers)) : null),
+        h("div", { class: "wish-actions wide checks" },
+          check(c, "bought", "Gekauft"),
+          check(c, "wrapped", "Eingepackt")));
+    }
+
+    function check(c, field, label) {
+      const id = `${field}-${c.id}`;
+      const box = h("input", { type: "checkbox", id, checked: !!c[field] });
+      box.addEventListener("change", async () => {
+        box.disabled = true;
+        try {
+          const res = await api("PUT", `/api/wishes/${c.id}/claim`, { [field]: box.checked });
+          c.bought = res.bought;
+          c.wrapped = res.wrapped;
+          draw();
+        } catch (e) {
+          toast(e.message, true);
+          box.checked = !box.checked;
+          box.disabled = false;
+        }
+      });
+      return h("label", { class: "check", for: id }, box, h("span", null, label));
     }
 
     draw();
@@ -446,8 +644,10 @@
       toast("Du bist schon angemeldet.");
     }
     const list = hash.match(/^\/liste\/(\d+)$/);
+    document.getElementById("shopBtn").classList.toggle("active", hash === "/einkauf");
     try {
       if (list) await listView(Number(list[1]));
+      else if (hash === "/einkauf") await shoppingView();
       else await homeView();
     } catch (e) {
       showError(e);
