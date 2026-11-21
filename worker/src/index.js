@@ -72,6 +72,7 @@ async function route(request, env) {
   if (m === "GET" && path === "/api/me") return json({ user: publicUser(me) });
   if (m === "GET" && path === "/api/invite") return json({ invite: await currentInvite(env) });
   if (m === "POST" && path === "/api/me/password") return changeOwnPassword(request, env, me);
+  if (m === "PUT" && path === "/api/me/avatar") return setAvatar(request, env, me);
   if (path.startsWith("/api/admin/")) {
     if (!me.is_admin) throw new HttpError(403, "Nur für Admins");
     if (m === "POST" && path === "/api/admin/invite") return renewInvite(env);
@@ -160,16 +161,26 @@ async function authenticate(request, env) {
   if (!token) throw new HttpError(401, "Bitte anmelden");
   const tokenHash = await sha256(token);
   const user = await env.DB.prepare(
-    "SELECT u.id, u.name, u.is_admin FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?"
+    "SELECT u.id, u.name, u.is_admin, u.avatar FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?"
   )
     .bind(tokenHash)
     .first();
   if (!user) throw new HttpError(401, "Bitte anmelden");
-  return { id: user.id, name: user.name, is_admin: !!user.is_admin, tokenHash };
+  return { ...publicUser(user), tokenHash };
 }
 
 function publicUser(u) {
-  return { id: u.id, name: u.name, is_admin: !!u.is_admin };
+  return { id: u.id, name: u.name, is_admin: !!u.is_admin, avatar: u.avatar ?? null };
+}
+
+const AVATAR_COUNT = 40; // must match docs/avatars.js
+
+async function setAvatar(request, env, me) {
+  const { avatar } = await body(request);
+  if (avatar !== null && !(Number.isInteger(avatar) && avatar >= 1 && avatar <= AVATAR_COUNT))
+    throw new HttpError(400, "Diesen Avatar gibt es nicht");
+  await env.DB.prepare("UPDATE users SET avatar = ? WHERE id = ?").bind(avatar, me.id).run();
+  return json({ user: publicUser({ ...me, avatar }) });
 }
 
 function cleanName(name) {
@@ -209,7 +220,7 @@ async function register(request, env) {
   const salt = randomHex(16);
   const hash = await hashPassword(password, salt);
   const row = await env.DB.prepare(
-    "INSERT INTO users (name, pw_hash, pw_salt) VALUES (?, ?, ?) RETURNING id, name, is_admin"
+    "INSERT INTO users (name, pw_hash, pw_salt) VALUES (?, ?, ?) RETURNING id, name, is_admin, avatar"
   )
     .bind(name, hash, salt)
     .first();
@@ -219,7 +230,7 @@ async function register(request, env) {
 
 async function login(request, env) {
   const { name, password } = await body(request);
-  const user = await env.DB.prepare("SELECT id, name, is_admin, pw_hash, pw_salt FROM users WHERE name = ?")
+  const user = await env.DB.prepare("SELECT id, name, is_admin, avatar, pw_hash, pw_salt FROM users WHERE name = ?")
     .bind(String(name || "").trim().replace(/\s+/g, " "))
     .first();
   const fail = new HttpError(401, "Name oder Passwort falsch");
@@ -253,7 +264,7 @@ async function changeOwnPassword(request, env, me) {
 // ---------- admin ----------
 
 async function existingUser(env, id) {
-  const user = await env.DB.prepare("SELECT id, name, is_admin FROM users WHERE id = ?").bind(id).first();
+  const user = await env.DB.prepare("SELECT id, name, is_admin, avatar FROM users WHERE id = ?").bind(id).first();
   if (!user) throw new HttpError(404, "Diese Person gibt es nicht");
   return user;
 }
@@ -304,7 +315,7 @@ async function renewInvite(env) {
 
 async function listUsers(env) {
   const { results } = await env.DB.prepare(
-    `SELECT u.id, u.name, COUNT(w.id) AS wish_count
+    `SELECT u.id, u.name, u.avatar, COUNT(w.id) AS wish_count
      FROM users u LEFT JOIN wishes w ON w.user_id = u.id
      GROUP BY u.id ORDER BY u.name COLLATE NOCASE`
   ).all();
@@ -319,7 +330,7 @@ function placeholders(n) {
 }
 
 async function listWishes(env, me, ownerId) {
-  const owner = await env.DB.prepare("SELECT id, name FROM users WHERE id = ?").bind(ownerId).first();
+  const owner = await env.DB.prepare("SELECT id, name, avatar FROM users WHERE id = ?").bind(ownerId).first();
   if (!owner) throw new HttpError(404, "Diese Person gibt es nicht");
 
   const { results: wishes } = await env.DB.prepare(`SELECT ${WISH_COLUMNS} FROM wishes w WHERE w.user_id = ? ${WISH_ORDER}`)
@@ -638,7 +649,7 @@ async function unclaimWish(env, me, id) {
 
 async function myClaims(env, me) {
   const { results: rows } = await env.DB.prepare(
-    `SELECT ${WISH_COLUMNS}, c.bought, c.wrapped, o.id AS owner_id, o.name AS owner_name
+    `SELECT ${WISH_COLUMNS}, c.bought, c.wrapped, o.id AS owner_id, o.name AS owner_name, o.avatar AS owner_avatar
      FROM claims c JOIN wishes w ON w.id = c.wish_id JOIN users o ON o.id = w.user_id
      WHERE c.user_id = ? ORDER BY o.name COLLATE NOCASE, w.slot, w.id`
   )

@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS users (
   pw_hash TEXT NOT NULL,
   pw_salt TEXT NOT NULL,
   is_admin INTEGER NOT NULL DEFAULT 0,
+  avatar INTEGER,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

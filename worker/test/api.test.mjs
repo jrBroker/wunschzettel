@@ -339,6 +339,29 @@ await test("unreachable link: preview returns no image, wish stays", async () =>
   assert.equal(p.data.wish.title, "Nix");
 });
 
+// ---------- avatar ----------
+
+await test("avatar: set, shown everywhere, invalid rejected, reset", async () => {
+  assert.equal((await call("GET", "/api/me", { token: carl.token })).data.user.avatar, null);
+  for (const bad of [0, 41, 2.5, "3", -1]) {
+    assert.equal((await call("PUT", "/api/me/avatar", { token: carl.token, body: { avatar: bad } })).status, 400, String(bad));
+  }
+  const r = await call("PUT", "/api/me/avatar", { token: carl.token, body: { avatar: 21 } });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.user.avatar, 21);
+  assert.equal((await call("GET", "/api/me", { token: carl.token })).data.user.avatar, 21);
+  assert.equal((await call("GET", "/api/users", { token: anna.token })).data.users.find((u) => u.id === carl.id).avatar, 21);
+  assert.equal((await call("GET", `/api/users/${carl.id}/wishes`, { token: anna.token })).data.owner.avatar, 21);
+  assert.equal((await call("POST", "/api/login", { body: carl })).data.user.avatar, 21);
+  // shows up as owner_avatar in someone's shopping list
+  const w = (await call("POST", "/api/wishes", { token: carl.token, body: { slot: 1, title: `Avatar-Test ${suffix}` } })).data.wish;
+  await call("POST", `/api/wishes/${w.id}/claim`, { token: anna.token });
+  assert.equal((await call("GET", "/api/claims", { token: anna.token })).data.claims.find((c) => c.id === w.id).owner_avatar, 21);
+  await call("DELETE", `/api/wishes/${w.id}`, { token: carl.token });
+  assert.equal((await call("PUT", "/api/me/avatar", { token: carl.token, body: { avatar: null } })).data.user.avatar, null);
+  assert.equal((await call("PUT", "/api/me/avatar", { body: { avatar: 1 } })).status, 401);
+});
+
 // ---------- own password ----------
 
 await test("change own password: wrong current, too short, success", async () => {

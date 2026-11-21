@@ -98,7 +98,10 @@
   }
 
   const AVATAR_COLORS = ["#c8473a", "#2f8a5f", "#c99228", "#3d6fb0", "#8a4fb0", "#b0567f", "#2f8a8a", "#b06a2f"];
-  function avatar(name) {
+  function avatar(name, avatarId) {
+    // avatarSvg only returns our own static drawings (ids are validated by the server), never user input.
+    const art = avatarId && window.avatarSvg ? window.avatarSvg(avatarId) : null;
+    if (art) return h("div", { class: "avatar has-art", "aria-hidden": "true" }, svg(art));
     let hash = 0;
     for (const ch of name) hash = (hash * 31 + ch.codePointAt(0)) >>> 0;
     return h("div", { class: "avatar", style: `background:${AVATAR_COLORS[hash % AVATAR_COLORS.length]}`, "aria-hidden": "true" },
@@ -238,12 +241,16 @@
     const eve = new Date(seasonYear(), 11, 24);
     const days = Math.round((eve - today) / DAY);
     const sorted = [...users].sort((a, b) => (b.id === me.id) - (a.id === me.id));
+    const mine = users.find((u) => u.id === me.id);
 
     render(
       h("div", { class: "hero" },
         h("div", null,
           h("h1", null, "Hallo ", h("em", null, me.name), ","),
-          h("p", null, "hier sind die Wunschzettel der ganzen Familie.")),
+          h("p", null, "hier sind die Wunschzettel der ganzen Familie."),
+          mine && !mine.avatar
+            ? h("a", { class: "avatar-hint", href: "#/konto" }, "Such dir einen Avatar aus →")
+            : null),
         h("div", { class: "countdown" },
           days < 0
             ? h("span", null, h("strong", null, "Frohe"), " Weihnachten!")
@@ -257,7 +264,7 @@
       h("h2", { class: "section-title" }, "Familie"),
       h("div", { class: "family-grid" },
         sorted.map((u) => h("a", { class: "card person" + (u.id === me.id ? " me" : ""), href: `#/liste/${u.id}` },
-          avatar(u.name),
+          avatar(u.name, u.avatar),
           h("div", { class: "person-info" },
             h("div", { class: "person-name" }, u.name, u.id === me.id ? h("span", { class: "tag" }, "Du") : null),
             h("div", { class: "person-meta" },
@@ -276,7 +283,7 @@
     return [
       h("a", { class: "back", href: "#/" }, "← Zur Familie"),
       h("div", { class: "list-head" },
-        avatar(owner.name),
+        avatar(owner.name, owner.avatar),
         h("div", null, h("h1", null, own ? "Mein Wunschzettel" : `Wunschzettel von ${owner.name}`))),
     ];
   }
@@ -559,7 +566,7 @@
       const groups = [];
       for (const c of claims) {
         let g = groups.find((x) => x.id === c.owner_id);
-        if (!g) groups.push((g = { id: c.owner_id, name: c.owner_name, items: [] }));
+        if (!g) groups.push((g = { id: c.owner_id, name: c.owner_name, avatar: c.owner_avatar, items: [] }));
         g.items.push(c);
       }
 
@@ -577,7 +584,7 @@
             h("p", { class: "muted" }, "Öffne die Wunschzettel der Familie und klick auf „Ich schenke das“."),
             h("a", { class: "btn btn-gold", href: "#/" }, "Zur Familie")),
         h("div", { class: "timeline" }, groups.map((g) => h("section", { class: "card slot" },
-          h("a", { class: "person-head", href: `#/liste/${g.id}` }, avatar(g.name), h("h2", { class: "slot-title" }, `Für ${g.name}`)),
+          h("a", { class: "person-head", href: `#/liste/${g.id}` }, avatar(g.name, g.avatar), h("h2", { class: "slot-title" }, `Für ${g.name}`)),
           h("ul", { class: "wishes" }, g.items.map(shopItem))))));
       window.scrollTo(0, y);
     }
@@ -649,13 +656,39 @@
       const y = window.scrollY;
       render(
         h("a", { class: "back", href: "#/" }, "← Zur Familie"),
-        h("div", { class: "list-head" }, avatar(me.name),
+        h("div", { class: "list-head" }, avatar(me.name, me.avatar),
           h("div", null, h("h1", null, me.name), me.is_admin ? h("span", { class: "tag" }, "Admin") : null)),
+        avatarCard(),
         passwordCard(),
         me.is_admin ? adminCard() : null,
         h("div", { class: "account-footer" },
           h("button", { class: "btn btn-ghost", type: "button", onclick: logout }, "Abmelden")));
       window.scrollTo(0, y);
+    }
+
+    function avatarCard() {
+      const pick = async (id) => {
+        try {
+          const { user: u } = await api("PUT", "/api/me/avatar", { avatar: id });
+          setSession(token, { ...me, avatar: u.avatar });
+          draw();
+          toast(id ? "Avatar gespeichert" : "Avatar entfernt");
+        } catch (e) { toast(e.message, true); }
+      };
+      const option = (id, content, label) => h("button", {
+        class: "avatar-option" + ((me.avatar ?? null) === id ? " selected" : ""), type: "button",
+        title: label, "aria-label": label, "aria-pressed": String((me.avatar ?? null) === id),
+        onclick: () => pick(id),
+      }, content);
+      const group = (kind) => (window.AVATARS || []).filter((a) => a.kind === kind)
+        .map((a) => option(a.id, svg(window.avatarSvg(a.id)), a.label));
+      return h("section", { class: "card panel" },
+        h("h2", { class: "panel-title" }, "Dein Avatar"),
+        h("h3", { class: "sub-title" }, "Menschen"),
+        h("div", { class: "avatar-grid" }, group("person")),
+        h("h3", { class: "sub-title" }, "Tiere"),
+        h("div", { class: "avatar-grid" }, group("animal"),
+          option(null, h("span", { class: "avatar-letter" }, [...me.name][0].toUpperCase()), "Kein Avatar, nur Anfangsbuchstabe")));
     }
 
     function passwordCard() {
@@ -748,7 +781,7 @@
       const action = (kind, label) => h("button", { class: "btn btn-ghost btn-sm" + (open === kind ? " active" : ""), type: "button",
         onclick: () => { state.open = open === kind ? null : { id: u.id, kind }; draw(); } }, label);
       return h("li", { class: "admin-row" },
-        h("div", { class: "admin-person" }, avatar(u.name), h("strong", null, u.name), self ? h("span", { class: "tag" }, "Du") : null),
+        h("div", { class: "admin-person" }, avatar(u.name, u.avatar), h("strong", null, u.name), self ? h("span", { class: "tag" }, "Du") : null),
         h("div", { class: "row-wrap" },
           action("rename", "Umbenennen"),
           self ? null : action("password", "Passwort zurücksetzen"),
